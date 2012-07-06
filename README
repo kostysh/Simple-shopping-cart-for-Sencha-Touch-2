@@ -7,6 +7,11 @@ Author: Constantine V. Smirnov, kostysh(at)gmail.com, http://mindsaur.com
 License: GNU GPL v3.0
 Current version: 1.0
 
+Features:
+=========
+- Adding products to cart
+- Cart indicator with total count of items and total sum badges
+- Cart panel with list of added products, quantity management, cart submitting
 
 Installing:
 ===========
@@ -42,6 +47,10 @@ Installing:
     });
 
 
-Demo: 
-=====
+Cart methods:
+=============
+Script is fully commented, look for methods descriptions into src/component/cart/src/Cart.js
+
+Live demo: 
+==========
 http://mindsaur.com/demo/cart
