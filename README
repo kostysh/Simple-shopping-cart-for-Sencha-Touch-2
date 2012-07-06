@@ -6,6 +6,7 @@ Simple yet powerful script for adding shopping cart features to Sencha Touch bas
 Author: Constantine V. Smirnov, kostysh(at)gmail.com, http://mindsaur.com
 License: GNU GPL v3.0
 Current version: 1.0
+ST2 version: 2.0.1.1
 
 Features:
 =========
@@ -63,3 +64,8 @@ Script is fully commented, look for methods descriptions into src/component/cart
 Live demo: 
 ==========
 http://mindsaur.com/demo/cart
+
+Known issues:
+=============
+- Current ST2 localStorage proxy has not works correctly with hasMany data associations. 
+This issue temporary fixed by override code from src/component/cart/utils/WebStor.js
