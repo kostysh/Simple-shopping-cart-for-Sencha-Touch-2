@@ -1,0 +1,1 @@
+{"id":"b1e17ce1-af69-11e2-a5ff-3bcfc868a247","js":[{"path":"sdk/sencha-touch.js","type":"js"},{"path":"app.js","bundle":true,"update":"full","type":"js"}],"css":[{"path":"resources/css/app.css","update":"full","type":"css"},{"path":"src/component/cart/resources/css/cart.css","update":"full","type":"css"}]}

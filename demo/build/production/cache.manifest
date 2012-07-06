@@ -1,0 +1,38 @@
+CACHE MANIFEST
+# 7813a8a3c69b8ff274a74a1f03ab409fe09e9473
+index.html
+# abe9d715adb82c0ef4294de28314b4b8afd6575f
+data/data.json
+# 3200ebf77e0a0618248c4402bec3729a2dc635cb
+resources/images/products/apple.jpg
+# 52df3f1e47c5c2e818c9351edf7eb99f57b289bf
+resources/images/products/baby-toys.jpg
+# f2bc6d5bbe76ed903eb42f4198d24c32356fa9af
+resources/images/products/basketball.jpg
+# 1437099fcc6808cc18a774b3777425e0cb5471d2
+resources/images/products/bottle.jpg
+# a76449aaff02d8b07d622b7310d032855ab1b7c0
+resources/images/products/briefcase.jpg
+# c6934c7bd3959cfb5266b345acf94bf04fb15975
+resources/images/products/cheese.jpg
+# a9ad63f717ef24dc21c453e9ff794008a988159e
+resources/images/products/drum.jpg
+# ff6a857632f1d50d2c05437f844ca70fc98589fc
+resources/images/products/plant.jpg
+# d01d4166281e2a51f15d1bf8f487ad16b6cb8fb8
+resources/images/products/present.jpg
+# c0fb37c07672f094387a7d1db79a0593ca77451a
+resources/images/products/pumpkin.jpg
+# 53ee6fb30a956f4075cc18ca049a80f46b92b55f
+resources/images/products/shrimp.jpg
+# 1e5365a24a4297d9b0080cbeea4ec07ead90aa7c
+resources/images/products/tulip.jpg
+# 894d7e419999de0de765c01f6da8b8e72a89192d
+resources/css/app.css
+# 667e1f093f66f639ee0ea0042455edb0cff250b5
+src/component/cart/resources/css/cart.css
+
+FALLBACK:
+
+NETWORK:
+*

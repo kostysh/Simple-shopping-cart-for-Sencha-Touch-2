@@ -1,0 +1,148 @@
+{
+    "items": [
+        {
+            "id": 1,
+            "text": "Food",
+            "leaf": true,
+
+            "products": [
+                {
+                    "id": 11,
+                    "text": "Apple",
+                    "weight": "120/25 grm",
+                    "price": 27,
+                    "img_tmb": "resources/images/products/apple.jpg",
+                    "leaf": true
+                },
+                {
+                    "id": 12,
+                    "text": "Cheese",
+                    "weight": "100 grm",
+                    "price": 34,
+                    "img_tmb": "resources/images/products/cheese.jpg",
+                    "leaf": true
+                },
+                {
+                    "id": 13,
+                    "text": "Shrimp",
+                    "weight": "200/25 grm",
+                    "price": 41,
+                    "img_tmb": "resources/images/products/shrimp.jpg",
+                    "leaf": true
+                },
+                {
+                    "id": 14,
+                    "text": "Pumpkin",
+                    "weight": "400/25 grm",
+                    "price": 85,
+                    "img_tmb": "resources/images/products/pumpkin.jpg",
+                    "leaf": true
+                }
+            ]
+        },
+        {
+            "id": 2,
+            "text": "Baby",
+            "leaf": true,
+
+            "products": [
+                {
+                    "id": 21,
+                    "text": "Baby toys",
+                    "weight": "220 grm",
+                    "price": 22,
+                    "img_tmb": "resources/images/products/baby-toys.jpg",
+                    "leaf": true
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "text": "Sport",
+            "leaf": true,
+
+            "products": [
+                {
+                    "id": 31,
+                    "text": "Ball",
+                    "weight": "300 grm",
+                    "price": 120,
+                    "img_tmb": "resources/images/products/basketball.jpg",
+                    "leaf": true
+                }
+            ]
+        },
+        {
+            "id": 4,
+            "text": "Music",
+            "leaf": true,
+
+            "products": [
+                {
+                    "id": 41,
+                    "text": "Drum",
+                    "weight": "450 grm",
+                    "price": 350,
+                    "img_tmb": "resources/images/products/drum.jpg",
+                    "leaf": true
+                }
+            ]
+        },
+        {
+            "id": 5,
+            "text": "Things",
+            "leaf": false,
+
+            "items": [
+                {
+                    "id": 6,
+                    "text": "Flora",
+                    "leaf": true,
+
+                    "products": [
+                        {
+                            "id": 61,
+                            "text": "Plant",
+                            "weight": "150 grm",
+                            "price": 50,
+                            "img_tmb": "resources/images/products/plant.jpg",
+                            "leaf": true
+                        },
+                        {
+                            "id": 62,
+                            "text": "Tulip",
+                            "weight": "75 grm",
+                            "price": 25,
+                            "img_tmb": "resources/images/products/tulip.jpg",
+                            "leaf": true
+                        }
+                    ]
+                },
+                {
+                    "id": 7,
+                    "text": "Containers",
+                    "leaf": true,
+
+                    "products": [
+                        {
+                            "id": 71,
+                            "text": "Bottle",
+                            "weight": "250 grm",
+                            "price": 150,
+                            "img_tmb": "resources/images/products/bottle.jpg",
+                            "leaf": true
+                        },
+                        {
+                            "id": 72,
+                            "text": "Briefcase",
+                            "weight": "375 grm",
+                            "price": 425,
+                            "img_tmb": "resources/images/products/briefcase.jpg",
+                            "leaf": true
+                        }
+                    ]
+                },
+            ]
+        },
+    ]
+}
