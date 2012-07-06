@@ -25,6 +25,11 @@ Installing:
         'Cs.component.cart.controller.Indicator',
         'Cs.component.cart.controller.Panel'
     ],
+- Add path to cart css into app.json (or into index.html directly):
+    {
+        "path": "src/component/cart/resources/css/cart.css",
+        "update": "delta"
+    }
 - Initialize cart from 'launch' application method:
     // Initialize shopping cart products store
     // Look for products store example in demo
