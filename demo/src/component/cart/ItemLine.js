@@ -4,7 +4,7 @@
  * @fileOverview Config for cart panel component DataView
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120629
+ * @date 20120707
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
@@ -153,11 +153,11 @@ Ext.define('Cs.component.cart.ItemLine', {
     updatePrice: function(newPrice, oldPrice) {
         var price = this.down('#price');
 
-        if (oldPrice) {
+        if (Ext.isDefined(oldPrice)) {
             price.setHtml('');
         }
 
-        if (newPrice) {
+        if (Ext.isDefined(newPrice)) {
             price.setHtml('Price: ' + 
                           newPrice + ' ' + 
                           Cs.Cart.getCurrency());
@@ -187,13 +187,13 @@ Ext.define('Cs.component.cart.ItemLine', {
     updateQuantity: function(newQty, oldQty) {
         var qtyEl = this.down('#quantity');
 
-        if (oldQty) {
+        if (Ext.isDefined(oldQty)) {
             qtyEl.setValue(0);
             qtyEl.setId(this.getProduct_id());
             qtyEl.setLabel('');
         }
 
-        if (newQty) {
+        if (Ext.isDefined(newQty)) {
             var price = this.getPrice();
             
             qtyEl.setValue(newQty);
