@@ -67,5 +67,5 @@ http://mindsaur.com/demo/cart
 
 Known issues:
 =============
-- Current ST2 localStorage proxy has not works correctly with hasMany data associations. 
+- Current ST2 localStorage proxy not works correctly with hasMany data associations. 
 This issue temporary fixed by override code from src/component/cart/utils/WebStor.js
