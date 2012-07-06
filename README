@@ -2,3 +2,46 @@ Simple-shopping-cart-for-Sencha-Touch-2
 =======================================
 
 Simple yet powerful script for adding shopping cart features to Sencha Touch based mobile apps.
+
+Author: Constantine V. Smirnov, kostysh(at)gmail.com, http://mindsaur.com
+License: GNU GPL v3.0
+Current version: 1.0
+
+
+Installing:
+===========
+- Place src to your app folder;
+- Configure custom path for cart components: 
+    Ext.Loader.setPath({
+        'Cs': 'src'
+    });
+
+- Initialize cart from 'launch' application method:
+    // Initialize shopping cart products store
+    // Look for products store example in demo
+    Cs.Cart.setProductsStore('Products_store_name');
+
+    // Setup currency abr
+    Cs.Cart.setCurrency('USD');
+
+    // Setup cart submit callback
+    Cs.Cart.setCallback(function(encData) {
+        
+        /**
+         * You can use cart data as you want
+         */
+
+        console.log('Cart data submited', Ext.decode(encData));
+
+        // For now we show message only
+        Ext.Msg.alert(
+            null,
+            Ext.String.ellipsis(encData, 16, true) +
+            ' more in console'
+        );
+    });
+
+
+Demo: 
+=====
+http://mindsaur.com/demo/cart
