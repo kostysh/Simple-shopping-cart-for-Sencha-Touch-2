@@ -20,7 +20,11 @@ Installing:
     Ext.Loader.setPath({
         'Cs': 'src'
     });
-
+- Add cart controllers to Ext.application() config:
+    controllers: [
+        'Cs.component.cart.controller.Indicator',
+        'Cs.component.cart.controller.Panel'
+    ],
 - Initialize cart from 'launch' application method:
     // Initialize shopping cart products store
     // Look for products store example in demo
