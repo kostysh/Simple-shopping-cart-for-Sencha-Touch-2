@@ -4,7 +4,7 @@
  * @fileOverview Config for cart panel component DataView
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120707
+ * @date 20120719
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
@@ -30,15 +30,9 @@ Ext.define('Cs.component.cart.ItemLine', {
     config: {
         
         /**
-         * These config fields should be equal to mapped data fields
+         * Object with product's data
          */
-        product_id: false,
-        img: false,
-        text: false,
-        description: false,
-        price: false,
-        weight: false,
-        quantity: false,
+        product: false,
         
         layout: 'vbox',
         items: [
@@ -114,93 +108,34 @@ Ext.define('Cs.component.cart.ItemLine', {
         ]
     },
     
-    /**
-     * Setup product thumbnail
-     * @private
-     */
-    updateImg: function(newImg, oldImg) {
-        var img = this.down('#image');
-
-        if (oldImg) {
-            img.setSrc('');
-        }
-
-        if (newImg) {
-            img.setSrc(newImg);
-        }
+    beforeInitialize: function() {
+        
+        // Shortcuts to product template elements 
+        this.quantityEl = this.down('#quantity');
+        this.imageEl = this.down('#image');
+        this.textEl = this.down('#text');
+        this.priceEl = this.down('#price');
+        this.weightEl = this.down('#weight');
     },
     
     /**
-     * Setup product name
      * @private
      */
-    updateText: function(newText, oldText) {
-        var text = this.down('#text');
-
-        if (oldText) {
-            text.setHtml('');
-        }
-
-        if (newText) {
-            text.setHtml(newText);
-        }
-    },
-    
-    /**
-     * Setup product price
-     * @private
-     */
-    updatePrice: function(newPrice, oldPrice) {
-        var price = this.down('#price');
-
-        if (Ext.isDefined(oldPrice)) {
-            price.setHtml('');
-        }
-
-        if (Ext.isDefined(newPrice)) {
-            price.setHtml('Price: ' + 
-                          newPrice + ' ' + 
-                          Cs.Cart.getCurrency());
-        }
-    },
-    
-    /**
-     * Setup product weight
-     * @private
-     */
-    updateWeight: function(newWeight, oldWeight) {
-        var weight = this.down('#weight');
-
-        if (oldWeight) {
-            weight.setHtml('');
-        }
-
-        if (newWeight) {
-            weight.setHtml('Weight: ' + newWeight);
-        }
-    },
-    
-    /**
-     * Setup product quantity
-     * @private
-     */
-    updateQuantity: function(newQty, oldQty) {
-        var qtyEl = this.down('#quantity');
-
-        if (Ext.isDefined(oldQty)) {
-            qtyEl.setValue(0);
-            qtyEl.setId(this.getProduct_id());
-            qtyEl.setLabel('');
-        }
-
-        if (Ext.isDefined(newQty)) {
-            var price = this.getPrice();
+    updateProduct: function(product) {
+        if (product) {
             
-            qtyEl.setValue(newQty);
-            qtyEl.setId(this.getProduct_id());
-            qtyEl.setLabel('Subtotal: ' + 
-                           price * newQty + ' ' +
-                           Cs.Cart.getCurrency());
+            // Update product template
+            this.quantityEl.setId(product['id']);
+            this.imageEl.setSrc(product['img_tmb']);
+            this.textEl.setHtml(product['text']);
+            this.priceEl.setHtml('Price: ' + 
+                                 product['price'] + ' ' + 
+                                 Cs.Cart.getCurrency());
+            this.weightEl.setHtml('Weight: ' + product['weight']);
+            this.quantityEl.setValue(product['quantity']);
+            this.quantityEl.setLabel('Subtotal: ' + 
+                                     product['price'] * product['quantity'] + ' ' +
+                                     Cs.Cart.getCurrency());
         }
     }
 });

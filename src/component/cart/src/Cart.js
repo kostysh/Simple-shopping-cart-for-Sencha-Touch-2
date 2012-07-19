@@ -4,7 +4,8 @@
  * @fileOverview Shopping cart manager singleton
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120629
+ * @date 20120719
+ * @version 1.0.1
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
@@ -37,7 +38,7 @@ Ext.define('Cs.component.cart.src.Cart', {
         'Cs.component.cart.store.Cart'
     ],
 	
-	/**
+    /**
      * @event changed
      * Fired when cart is changed
      * @param {Ext.data.Model} cart Active cart record object
@@ -97,11 +98,11 @@ Ext.define('Cs.component.cart.src.Cart', {
      * @private
      */
     constructor: function(config) {
-		this.initConfig(config);
+        this.initConfig(config);
         return this;
-	},
+    },
 	
-	/**
+    /**
      * Create new cart
      * @private
      */
@@ -123,12 +124,12 @@ Ext.define('Cs.component.cart.src.Cart', {
      * Deactivate current active cart
      */
     deactivate: function() {
-		this.getActiveCart().set('active', false);
-		this.getStore().sync();
-		
-		// Create and init new empty cart
-		this.onStoreLoad();
-	},
+        this.getActiveCart().set('active', false);
+        this.getStore().sync();
+
+        // Create and init new empty cart
+        this.onStoreLoad();
+    },
 
     /**
      * Add new record to cart (or update existed)
@@ -187,10 +188,11 @@ Ext.define('Cs.component.cart.src.Cart', {
      * @param {String} id Product Id
      */
     remove: function(id) {
-        var record = this.getActiveProducts().findRecord('product_id', id);
-
+        var activeProducts = this.getActiveProducts();
+        var record = activeProducts.findRecord('product_id', id);
+        
         if (record !== null) {
-            record.destroy();
+            activeProducts.removeAt(activeProducts.indexOf(record));
             this.onCartChanged();
         }
     },
@@ -209,8 +211,8 @@ Ext.define('Cs.component.cart.src.Cart', {
      * @method submit
      */
     submit: function(callback, scope) {
-		var self = this;
-        var cartData = self.buildCartData();
+        var self = this;
+        var cartData = self.buildCartData(true);
 
         if (!Ext.isFunction(callback)) {
             callback = Ext.emptyFn;
@@ -225,9 +227,9 @@ Ext.define('Cs.component.cart.src.Cart', {
         } 
 				
         // @todo Move confirmation text to cart config
-		Ext.Msg.confirm(null, 
-                        'Are you want to clean cart after submit?', 
-                        function(answer) {
+        Ext.Msg.confirm(null, 
+                'Are you want to clean cart after submit?', 
+                function(answer) {
 
             if (answer === 'yes') {
                 self.deactivate();
@@ -238,18 +240,18 @@ Ext.define('Cs.component.cart.src.Cart', {
         }); 
     },
 	
-	/**
-	 * Return count of items (products) in active cart
-	 * @method getItemsCount
-	 */
+    /**
+     * Return count of items (products) in active cart
+     * @method getItemsCount
+     */
     getItemsCount: function() {
         return this.getActiveProducts().getCount();
     },
 	
-	/**
-	 * Get total sum of products in active cart
-	 * @method getTotalSum
-	 */
+    /**
+     * Get total sum of products in active cart
+     * @method getTotalSum
+     */
     getTotalSum: function() {
         var cartAll = this.getActiveProducts().data.all;
         var total = 0;
@@ -288,8 +290,9 @@ Ext.define('Cs.component.cart.src.Cart', {
     /**
      * Build data Array for cart panel list store
      * @method buildCartData
+     * @param {Boolean} plain Enable plain cartData output
      */
-    buildCartData: function() {
+    buildCartData: function(plain) {
         var cartAll = this.getActiveProducts().data.all;
         var cartData = [];
         
@@ -298,9 +301,18 @@ Ext.define('Cs.component.cart.src.Cart', {
             var product = this.getProductById(cartItem.get('product_id'));
             
             if (product) {
-                cartData[cartData.length] = Ext.apply({
-                    'quantity': cartItem.get('quantity')
-                }, product.raw);
+                if (plain) {
+                    cartData[cartData.length] = Ext.apply({
+                        'quantity': cartItem.get('quantity')
+                    }, product.raw);
+                } else {
+                    cartData[cartData.length] = {
+                        'product': Ext.apply({
+                                       'quantity': cartItem.get('quantity')
+                                   }, product.raw)
+                    };
+                }
+                    
             }
         }
 
@@ -322,7 +334,7 @@ Ext.define('Cs.component.cart.src.Cart', {
      * @private
      */
     onStoreLoad: function() {
-		var store = this.getStore();
+        var store = this.getStore();
         
         // Search for active cart in store
         var activeCart = store.findRecord('active', true);
@@ -343,48 +355,48 @@ Ext.define('Cs.component.cart.src.Cart', {
      */
     applyStore: function(storeName) {
 		
-		// Create and register cart store
+        // Create and register cart store
         var store = Ext.create('Cs.component.cart.store.Cart');
         
         if (store && Ext.isObject(store) && store.isStore) {
-			
-			// Listen for load event of cart store
-			store.on({
-				scope: this,
-				load: this.onStoreLoad
-			});
-		} else {
-			
-            // <debug>
-            Ext.Logger.warn('Cart data store cannot be found', this);
-            // </debug>
-		}
-		
-		return store;
+
+            // Listen for load event of cart store
+            store.on({
+                scope: this,
+                load: this.onStoreLoad
+            });
+        } else {
+
+        // <debug>
+        Ext.Logger.warn('Cart data store cannot be found', this);
+        // </debug>
+            }
+
+            return store;
 	},
 	
-	/**
+    /**
      * @private
      */
     updateStore: function(newStore, oldStore) {
-		if (oldStore && Ext.isObject(oldStore) && oldStore.isStore) {
-			
-			// Unregister and destroy old cart store
-			Ext.data.StoreManager.unregister(oldStore);
-			oldStore.destroy();
-		}
-		
-		if (newStore && Ext.isObject(newStore) && newStore.isStore) {
-			
-			// Register load new cart store
-			Ext.data.StoreManager.register(newStore);
-			newStore.load();
-		}
-	},
-	
-	/**
-	 * @private
-	 */
+        if (oldStore && Ext.isObject(oldStore) && oldStore.isStore) {
+
+            // Unregister and destroy old cart store
+            Ext.data.StoreManager.unregister(oldStore);
+            oldStore.destroy();
+        }
+
+        if (newStore && Ext.isObject(newStore) && newStore.isStore) {
+
+            // Register load new cart store
+            Ext.data.StoreManager.register(newStore);
+            newStore.load();
+        }
+    },
+
+    /**
+     * @private
+     */
     applyProductsStore: function(storeName) {
         if (Ext.isEmpty(storeName)) {
             

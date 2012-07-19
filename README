@@ -5,8 +5,14 @@ Simple yet powerful script for adding shopping cart features to Sencha Touch bas
 
 Author: Constantine V. Smirnov, kostysh(at)gmail.com, http://mindsaur.com
 License: GNU GPL v3.0
-Current version: 1.0
+Current version: 1.0.1
 ST2 version: 2.0.1.1
+ST2 SDK Tools: 2.0.0 Beta 3
+
+Versions:
+=========
+1.0.1 Various bug fixes and improvements
+1.0 First release
 
 Features:
 =========

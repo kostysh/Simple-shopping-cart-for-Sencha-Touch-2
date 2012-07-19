@@ -4,7 +4,7 @@
  * @fileOverview Config for shopping cart panel controller
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120629
+ * @date 20120719
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
@@ -72,22 +72,7 @@ Ext.define('Cs.component.cart.controller.Panel', {
      * Called when cart panel is initialized
      */
     initializeCartPanel: function() {
-        var itemsList = this.getItemsList();
-        
-        // Create new Store cart items list
-        var carItemsStore = Ext.create('Ext.data.Store', {
-            fields: [
-						{name: 'id', type: 'integer'},
-						{name: 'text', type: 'string'},
-						{name: 'img_tmb', type: 'string'},
-						{name: 'price', type: 'float'},
-						{name: 'weight', type: 'string'},
-						{name: 'quantity', type: 'integer'}
-					]
-        });
-        
-        itemsList.setStore(carItemsStore);
-        
+                
         // Subscribe to Cart changed event
         Cs.Cart.on({
             scope: this,
@@ -105,10 +90,9 @@ Ext.define('Cs.component.cart.controller.Panel', {
             return;
         }
 
-        var itemsListView = this.getItemsList();        
-        var itemsStore = itemsListView.getStore();
+        var itemsListView = this.getItemsList();
         var itemsData = Cs.Cart.buildCartData();
-
+        
         // Disable some buttons if cart is empty
         if (itemsData.length === 0) {
             this.getClearBtn().disable();
@@ -117,8 +101,14 @@ Ext.define('Cs.component.cart.controller.Panel', {
             this.getClearBtn().enable();
             this.getSubmitBtn().enable();
         }
-
-        itemsStore.setData(itemsData);
+        
+        // Create new Store for cart items list 
+        var cartItemsStore = Ext.create('Ext.data.Store', {
+            fields: ['product'],
+            data: itemsData
+        });
+        
+        itemsListView.setStore(cartItemsStore);
         
         this.getTotalSum().setHtml(Cs.Cart.getTotalSum() + ' ' + 
                                    Cs.Cart.getCurrency());
@@ -127,32 +117,9 @@ Ext.define('Cs.component.cart.controller.Panel', {
     },
     
     /**
-     * Called when spinner is tapped
+     * Change item in cart panel by id
      */
-    onItemSpinnerSpin: function(spinField, qty) {
-        var itemsList = this.getItemsList();
-        var done = false;
-
-        if (qty === 0) {
-            
-            // Show deletion confirmation dialog if current qty === 0
-            // @todo Move confirmation string to config
-            Ext.Msg.confirm(null, 
-                            'Are you want to remove this product from cart?', 
-                            function(answer) {
-                            
-                if (answer === 'yes') {
-                    Cs.Cart.remove(spinField.getId());
-                    done = true;
-                }
-            });
-            
-            if (done) {
-                
-                // If item was removed then do not restore scroller pos
-                return;
-            }
-        } 
+    changeItem: function(id, qty) {
         
         // Get and remember last scroller Y position
         var scroller = this.getItemsList().getScrollable().getScroller();
@@ -170,7 +137,40 @@ Ext.define('Cs.component.cart.controller.Panel', {
         
         // Save updated qty value
         // spinField has id equal product_id
-        Cs.Cart.update(spinField.getId(), qty);        
+        Cs.Cart.update(id, qty);
+    },
+    
+    /**
+     * Remove item from cart by id
+     */
+    removeItem:  function(id) {
+        Cs.Cart.remove(id);
+    },
+    
+    /**
+     * Called when spinner is tapped
+     */
+    onItemSpinnerSpin: function(spinField, qty) {
+        var self = this;
+        var id = spinField.getId();
+        
+        if (qty === 0) {
+            
+            // Show deletion confirmation dialog if current qty === 0
+            // @todo Move confirmation string to config
+            Ext.Msg.confirm(null, 
+                            'Are you want to remove this product from cart?', 
+                            function(answer) {
+                            
+                if (answer === 'yes') {
+                    self.removeItem(id);
+                } else {
+                    self.changeItem(id, qty);
+                }
+            });
+        } else {
+            self.changeItem(id, qty);
+        }       
     },
     
     /**

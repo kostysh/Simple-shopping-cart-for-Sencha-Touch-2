@@ -4,7 +4,7 @@
  * @fileOverview Config for default compoment for component DataView
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120629
+ * @date 20120719
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
@@ -24,15 +24,10 @@ Ext.define('Cs.component.cart.Item', {
     config: {
         itemLine: true,
         
-        // This config based on products data structure
+        // Map product's data to dataItem setter
         dataMap: {
             getItemLine: {
-                setProduct_id: 'id',
-                setImg: 'img_tmb',
-                setText: 'text',
-                setPrice: 'price',
-                setWeight: 'weight',
-                setQuantity: 'quantity'
+                setProduct: 'product'
             }
         }
     },

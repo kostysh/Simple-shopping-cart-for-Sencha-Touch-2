@@ -80,9 +80,10 @@ Ext.define("Cart.view.Main", {
                 layout: 'fit',
                 padding: 10,
                 html: '<p>Simple shopping cart for Sencha Touch 2 demo.</p>' +
-                      '<p>Version: 1.0</p>' +
+                      '<p>Version: 1.0.1</p>' +
                       '<p>Author: Constantine Smirnov, <a href="http://mindsaur.com">http://mindsaur.com</a></p>' +
-                      '<p>License: GNU GPL v3.0</p>',
+                      '<p>License: GNU GPL v3.0</br></p>' +
+                      '<p>GitHub: <a href="https://github.com/kostysh/Simple-shopping-cart-for-Sencha-Touch-2">Simple-shopping-cart-for-Sencha-Touch-2</a></p>',
                 scrollable: 'vertical'
             }
         ]       
