@@ -33,21 +33,29 @@ Installing:
 ===========
 - Place src to your app folder;
 - Configure custom path for cart components: 
+<!-- language: lang-js -->
+        
         Ext.Loader.setPath({
             'Ext.ux': 'src/ux'
         });
 - Add cart controllers to Ext.application() config:
+<!-- language: lang-js -->
+        
         controllers: [
             'Ext.ux.Cart.controller.Indicator',
             'Ext.ux.Cart.controller.Panel',
             'Ext.ux.Cart.controller.Archive'
         ],
 - Add path to cart css into app.json (or into index.html directly):
+<!-- language: lang-js -->
+        
         {
             "path": "src/ux/Cart/resources/css/cart.css",
             "update": "delta"
         }
 - Initialize cart from 'launch' application method:
+<!-- language: lang-js -->
+        
         // Initialize shopping cart products store
         // Look for products store example in demo
         Cart.setProductsStore('Products_store_name');
@@ -75,6 +83,8 @@ Installing:
 
 Cart API methods:
 =============
+<!-- language: lang-js -->
+        
     Cart.create();// Create and activate new cart
     Cart.deactivate();// Deactivate current active cart
     Cart.add(id, qty);// Add new record to cart (or update existed)
