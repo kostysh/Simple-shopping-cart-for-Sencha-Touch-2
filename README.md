@@ -11,9 +11,9 @@ ST2 SDK Tools: 2.0.0 Beta 3
 
 Versions:
 =========
-1.1 New namespace, improved API and config, new carts archive feature, bug fixes, SDK updates
-1.0.1 Various bug fixes and improvements
-1.0 First release
+- 1.1 New namespace, improved API and config, new carts archive feature, bug fixes, SDK updates
+- 1.0.1 Various bug fixes and improvements
+- 1.0 First release
 
 Features:
 =========
@@ -33,60 +33,60 @@ Installing:
 ===========
 - Place src to your app folder;
 - Configure custom path for cart components: 
-    Ext.Loader.setPath({
-        'Ext.ux': 'src/ux'
-    });
+        Ext.Loader.setPath({
+            'Ext.ux': 'src/ux'
+        });
 - Add cart controllers to Ext.application() config:
-    controllers: [
-        'Ext.ux.Cart.controller.Indicator',
-        'Ext.ux.Cart.controller.Panel',
-        'Ext.ux.Cart.controller.Archive'
-    ],
+        controllers: [
+            'Ext.ux.Cart.controller.Indicator',
+            'Ext.ux.Cart.controller.Panel',
+            'Ext.ux.Cart.controller.Archive'
+        ],
 - Add path to cart css into app.json (or into index.html directly):
-    {
-        "path": "src/ux/Cart/resources/css/cart.css",
-        "update": "delta"
-    }
+        {
+            "path": "src/ux/Cart/resources/css/cart.css",
+            "update": "delta"
+        }
 - Initialize cart from 'launch' application method:
-    // Initialize shopping cart products store
-    // Look for products store example in demo
-    Cart.setProductsStore('Products_store_name');
-
-    // Setup currency abr
-    Cart.setCurrency('USD');
-
-    // Setup cart submit callback
-    Cart.setCallback(function(encData) {
-        
-        /**
-         * You can use cart data as you want
-         */
-
-        console.log('Cart data submited', Ext.decode(encData));
-
-        // For now we show message only
-        Ext.Msg.alert(
-            null,
-            Ext.String.ellipsis(encData, 16, true) +
-            ' more in console'
-        );
-    });
+        // Initialize shopping cart products store
+        // Look for products store example in demo
+        Cart.setProductsStore('Products_store_name');
+    
+        // Setup currency abr
+        Cart.setCurrency('USD');
+    
+        // Setup cart submit callback
+        Cart.setCallback(function(encData) {
+            
+            /**
+             * You can use cart data as you want
+             */
+    
+            console.log('Cart data submited', Ext.decode(encData));
+    
+            // For now we show message only
+            Ext.Msg.alert(
+                null,
+                Ext.String.ellipsis(encData, 16, true) +
+                ' more in console'
+            );
+        });
 
 
 Cart API methods:
 =============
-Cart.create();// Create and activate new cart
-Cart.deactivate();// Deactivate current active cart
-Cart.add(id, qty);// Add new record to cart (or update existed)
-Cart.update(id, qty, increment);// Update cart item
-Cart.remove(id);// Remove product record from cart by Id
-Cart.removeAll();// Remove all products from cart
-Cart.getProductsCount();// Return count of products in active cart
-Cart.getTotalSum(id);// Get total sum of products in active cart
-Cart.getProductById(id);// Get product record by Id from products store
-Cart.isArchive();// Check for archived carts
-Cart.restore(id);// Restore archived cart by Id
-Cart.clearArchive();// Clear all archived carts
+    Cart.create();// Create and activate new cart
+    Cart.deactivate();// Deactivate current active cart
+    Cart.add(id, qty);// Add new record to cart (or update existed)
+    Cart.update(id, qty, increment);// Update cart item
+    Cart.remove(id);// Remove product record from cart by Id
+    Cart.removeAll();// Remove all products from cart
+    Cart.getProductsCount();// Return count of products in active cart
+    Cart.getTotalSum(id);// Get total sum of products in active cart
+    Cart.getProductById(id);// Get product record by Id from products store
+    Cart.isArchive();// Check for archived carts
+    Cart.restore(id);// Restore archived cart by Id
+    Cart.clearArchive();// Clear all archived carts
 
 Script is fully commented, look into src/ux/Cart/src/Core.js
 
