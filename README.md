@@ -3,11 +3,11 @@ Simple-shopping-cart-for-Sencha-Touch-2
 
 Simple yet powerful script for adding shopping cart features to Sencha Touch based mobile apps.
 
-Author: Constantine V. Smirnov, kostysh(at)gmail.com, http://mindsaur.com
-License: GNU GPL v3.0
-Current version: 1.1
-ST2 version: 2.1.0 Beta
-ST2 SDK Tools: 2.0.0 Beta 3
+* Author: Constantine V. Smirnov, kostysh(at)gmail.com, http://mindsaur.com
+* License: GNU GPL v3.0
+* Current version: 1.1
+* ST2 version: 2.1.0 Beta1
+* ST2 SDK Tools: 2.0.0 Beta 3
 
 Versions:
 =========
