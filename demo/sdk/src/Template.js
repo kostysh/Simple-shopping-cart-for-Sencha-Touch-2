@@ -69,7 +69,7 @@ Ext.define('Ext.Template', {
 
     /**
      * Creates new template.
-     *
+     * 
      * @param {String...} html List of strings to be concatenated into template.
      * Alternatively an array of strings can be given, but then no config object may be passed.
      * @param {Object} config (optional) Config object
@@ -83,6 +83,14 @@ Ext.define('Ext.Template', {
             value;
 
         me.initialConfig = {};
+        
+        // Allow an array to be passed here so we can
+        // pass an array of strings and an object
+        // at the end
+        if (length === 1 && Ext.isArray(html)) {
+            args = html;
+            length = args.length;
+        }
 
         if (length > 1) {
             for (; i < length; i++) {
@@ -94,13 +102,8 @@ Ext.define('Ext.Template', {
                     buffer.push(value);
                 }
             }
-            html = buffer.join('');
         } else {
-            if (Ext.isArray(html)) {
-                buffer.push(html.join(''));
-            } else {
-                buffer.push(html);
-            }
+            buffer.push(html);
         }
 
         // @private
@@ -113,7 +116,7 @@ Ext.define('Ext.Template', {
 
     /**
      * @property {Boolean} isTemplate
-     * `true` in this class to identify an objact as an instantiated Template, or subclass thereof.
+     * `true` in this class to identify an object as an instantiated Template, or subclass thereof.
      */
     isTemplate: true,
 
@@ -308,10 +311,9 @@ Ext.define('Ext.Template', {
         return this.doInsert('beforeEnd', el, values, returnElement);
     },
 
-    doInsert: function(where, el, values, returnEl) {
-        el = Ext.getDom(el);
-        var newNode = Ext.DomHelper.insertHtml(where, el, this.apply(values));
-        return returnEl ? Ext.get(newNode, true) : newNode;
+    doInsert: function(where, el, values, returnElement) {
+        var newNode = Ext.DomHelper.insertHtml(where, Ext.getDom(el), this.apply(values));
+        return returnElement ? Ext.get(newNode) : newNode;
     },
 
     /**
@@ -323,8 +325,7 @@ Ext.define('Ext.Template', {
      * @return {HTMLElement/Ext.Element} The new node or Element
      */
     overwrite: function(el, values, returnElement) {
-        el = Ext.getDom(el);
-        el.innerHTML = this.apply(values);
-        return returnElement ? Ext.get(el.firstChild, true) : el.firstChild;
+        var newNode = Ext.DomHelper.overwrite(Ext.getDom(el), this.apply(values));
+        return returnElement ? Ext.get(newNode) : newNode;
     }
 });

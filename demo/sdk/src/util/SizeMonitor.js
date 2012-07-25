@@ -126,6 +126,8 @@ Ext.define('Ext.util.SizeMonitor', {
     },
 
     destroy: function() {
+        clearTimeout(this.sizeChangeThrottleTimer);
+
         this.callParent(arguments);
 
         this.destroyDetector('expand');

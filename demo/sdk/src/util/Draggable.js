@@ -155,7 +155,7 @@ Ext.define('Ext.util.Draggable', {
         offset.x = x = initialOffset.x;
         offset.y = y = initialOffset.y;
 
-        this.getTranslatable().doTranslate(x, y);
+        this.getTranslatable().translate(x, y);
     },
 
     updateCls: function(cls) {

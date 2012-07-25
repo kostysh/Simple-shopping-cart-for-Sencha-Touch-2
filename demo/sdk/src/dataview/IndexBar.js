@@ -87,7 +87,7 @@ Ext.define('Ext.dataview.IndexBar', {
 
         /**
          * @cfg {String} listPrefix
-         * The prefix string to be appended at the beginning of the list.
+         * The prefix string to be used at the beginning of the list.
          * E.g: useful to add a "#" prefix before numbers.
          * @accessor
          */

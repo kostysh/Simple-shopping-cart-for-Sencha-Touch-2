@@ -400,7 +400,7 @@ Ext.define('Ext.fx.runner.CssTransition', {
                 for (i = 0,ln = sessions.length; i < ln; i++) {
                     session = sessions[i];
                     if (session.animation === animation) {
-                        this.refreshRunningAnimationsData(session.element, session.list.slice(), true);
+                        this.refreshRunningAnimationsData(session.element, session.list.slice(), false);
                     }
                 }
             }

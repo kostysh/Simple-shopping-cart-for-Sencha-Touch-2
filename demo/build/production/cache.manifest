@@ -1,5 +1,5 @@
 CACHE MANIFEST
-# dfd9fa5220f745e364037cee12663063f439d49d
+# 987a5144e13571989044f2c27a4bd985b027ec89
 index.html
 # abe9d715adb82c0ef4294de28314b4b8afd6575f
 data/data.json
@@ -29,7 +29,7 @@ resources/images/products/shrimp.jpg
 resources/images/products/tulip.jpg
 # 894d7e419999de0de765c01f6da8b8e72a89192d
 resources/css/app.css
-# 667e1f093f66f639ee0ea0042455edb0cff250b5
+# c99f2befa8370deaf017832a4a2b54e3197e4970
 src/component/cart/resources/css/cart.css
 
 FALLBACK:

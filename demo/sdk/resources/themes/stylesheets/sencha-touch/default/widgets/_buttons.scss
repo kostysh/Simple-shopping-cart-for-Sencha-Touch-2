@@ -70,9 +70,9 @@ $include-button-highlights: $include-highlights !default;
       display: block;
 
       &.x-icon-mask {
-        width: 1.3em;
-        height: 1.3em;
-        -webkit-mask-size: 1.3em;
+        width: 1.1em;
+        height: 1.1em;
+        -webkit-mask-size: 1.1em;
       }
     }
 
@@ -147,6 +147,10 @@ $include-button-highlights: $include-highlights !default;
     .x-button-icon {
       width: .75em;
       height: .75em;
+
+      &.x-icon-mask {
+        -webkit-mask-size: .75em;
+      }
     }
   }
 
@@ -252,7 +256,7 @@ $include-button-highlights: $include-highlights !default;
       }
     }
 
-    &:not(:first-child) {
+    &:not(.x-first) {
       border-left: 0;
     }
   }

@@ -75,13 +75,13 @@ $include-toolbar-uis: $include-default-uis !default;
     overflow: hidden;
     text-overflow: ellipsis;
     margin: 0 0.3em;
+    padding: 0 .3em;
     max-width: 100%;
 
     .x-innerhtml {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      padding: 0 .3em;
     }
   }
 
@@ -156,7 +156,9 @@ $include-toolbar-uis: $include-default-uis !default;
       @include toolbar-button($toolbar-button-color, $gradient);
     }
 
+    .x-label,
     .x-form-label {
+      font-weight: bold;
       @include color-by-background($color);
       @include bevel-by-background($color);
     }

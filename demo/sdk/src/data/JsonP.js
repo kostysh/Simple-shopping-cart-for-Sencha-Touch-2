@@ -54,12 +54,20 @@ Ext.define('Ext.data.JsonP', {
 
     singleton: true,
 
-    statics: {
-        requestCount: 0,
-        requests: {}
-    },
 
     /* End Definitions */
+
+    /**
+     * Number of requests done so far.
+     * @private
+     */
+    requestCount: 0,
+
+    /**
+     * Hash of pending requests.
+     * @private
+     */
+    requests: {},
 
     /**
      * @property {Number} [timeout=30000]
@@ -124,7 +132,7 @@ Ext.define('Ext.data.JsonP', {
         var me = this,
             disableCaching = Ext.isDefined(options.disableCaching) ? options.disableCaching : me.disableCaching,
             cacheParam = options.disableCachingParam || me.disableCachingParam,
-            id = ++me.statics().requestCount,
+            id = ++me.requestCount,
             callbackName = options.callbackName || 'callback' + id,
             callbackKey = options.callbackKey || me.callbackKey,
             timeout = Ext.isDefined(options.timeout) ? options.timeout : me.timeout,
@@ -141,7 +149,7 @@ Ext.define('Ext.data.JsonP', {
 
         script = me.createScript(url, params, options);
 
-        me.statics().requests[id] = request = {
+        me.requests[id] = request = {
             url: url,
             params: params,
             script: script,
@@ -169,7 +177,7 @@ Ext.define('Ext.data.JsonP', {
      * @param {Object/String} request The request to abort
      */
     abort: function(request){
-        var requests = this.statics().requests,
+        var requests = this.requests,
             key;
 
         if (request) {
@@ -248,7 +256,7 @@ Ext.define('Ext.data.JsonP', {
         }
 
         delete this[request.callbackName];
-        delete this.statics()[request.id];
+        delete this.requests[request.id];
 
         this.cleanupErrorHandling(request);
         Ext.fly(request.script).destroy();

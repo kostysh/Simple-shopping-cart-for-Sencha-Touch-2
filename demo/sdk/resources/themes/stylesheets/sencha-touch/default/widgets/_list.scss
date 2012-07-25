@@ -67,9 +67,15 @@ $list-disclosure-size: 1.7em;
 
 /**
  * @var {measurement} $list-disclosure-round-size
- * Default size (width/height) for disclosure icons in a list with a 'round' ui.
+ * Default size (width/height) for disclosure icons in a list with a `round` ui.
  */
 $list-disclosure-round-size: 1.5em;
+
+/**
+ * @var {measurement} $list-round-padding
+ * Default padding for lists with a `round` ui.
+ */
+$list-round-padding: 13px !default;
 
 /**
  * Includes default list styles.
@@ -206,6 +212,10 @@ $list-disclosure-round-size: 1.5em;
       background-color: #EEEEEE !important; // @todo No !important plz
     }
 
+    .x-list-header-swap {
+      padding-right: $list-round-padding;
+    }
+
     .x-list-disclosure {
       overflow: hidden;
       -webkit-mask: 0 0 theme_image($theme-name, "disclosure2.png") no-repeat;
@@ -227,10 +237,10 @@ $list-disclosure-round-size: 1.5em;
     }
 
     .x-list-container {
-      padding: 13px 13px 0 13px;
+      padding: $list-round-padding $list-round-padding 0 $list-round-padding;
 
       .x-list-header {
-        padding-left: 13px;
+        padding-left: $list-round-padding;
         background-image: none;
       }
     }
@@ -282,7 +292,7 @@ $list-disclosure-round-size: 1.5em;
   }
 
   .x-dataview-inlineblock {
-    .x-dataview-item {
+    .x-dataview-item, .x-data-item {
       display: inline-block !important;
     }
   }

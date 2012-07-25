@@ -185,7 +185,7 @@ Ext.define('Ext.data.Types', {
                     if (isNaN(parsed)) {
                         // Dates with the format "2012-01-20" fail, but "2012/01/20" work in some browsers. We'll try and
                         // get around that.
-                        parsed = new Date(Date.parse(value.replace(this.dashesRe, "/")));
+                        parsed = new Date(Date.parse(value.replace(Types.dashesRe, "/")));
                         //<debug>
                         if (isNaN(parsed)) {
                             Ext.Logger.warn("Cannot parse the passed value (" + value + ") into a valid date");

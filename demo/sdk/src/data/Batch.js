@@ -178,6 +178,7 @@ Ext.define('Ext.data.Batch', {
 
             operation.setStarted();
 
+
             me.getProxy()[operation.getAction()](operation, onProxyReturn, me);
         }
     }

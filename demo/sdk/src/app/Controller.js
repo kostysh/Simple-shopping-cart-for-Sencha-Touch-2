@@ -329,7 +329,7 @@ Ext.define('Ext.app.Controller', {
         application: {},
 
         /**
-         * @cfg {Array} stores The set of stores to load for this Application. Each store is expected to
+         * @cfg {String[]} stores The set of stores to load for this Application. Each store is expected to
          * exist inside the *app/store* directory and define a class following the convention
          * AppName.store.StoreName. For example, in the code below, the *AppName.store.Users* class will be loaded.
          * Note that we are able to specify either the full class name (as with *AppName.store.Groups*) or just the
@@ -345,7 +345,7 @@ Ext.define('Ext.app.Controller', {
         stores: [],
 
         /**
-         * @cfg {Array} models The set of models to load for this Application. Each model is expected to exist inside the
+         * @cfg {String[]} models The set of models to load for this Application. Each model is expected to exist inside the
          * *app/model* directory and define a class following the convention AppName.model.ModelName. For example, in the
          * code below, the classes *AppName.model.User*, *AppName.model.Group* and *AppName.model.Product* will be loaded.
          * Note that we are able to specify either the full class name (as with *AppName.model.Product*) or just the
@@ -558,7 +558,8 @@ Ext.define('Ext.app.Controller', {
      * 1.x-inspired ref implementation
      */
     ref: function(refs) {
-        var refName, getterName, selector, info;
+        var me = this,
+            refName, getterName, selector, info;
 
         for (refName in refs) {
             selector = refs[refName];
@@ -574,7 +575,12 @@ Ext.define('Ext.app.Controller', {
                     info = refs[refName];
                 }
 
-                this[getterName] = Ext.Function.pass(this.getRef, [refName, info], this);
+                this[getterName] = function(refName, info) {
+                    var args = [refName, info];
+                    return function() {
+                        return me.getRef.apply(me, args.concat.apply(args, arguments));
+                    };
+                }(refName, info);
             }
 
             this.references = this.references || [];
@@ -659,12 +665,6 @@ Ext.define('Ext.app.Controller', {
         if (stores) {
             length = stores.length;
             config.stores = stores;
-
-            // <debug warn>
-            Ext.Logger.deprecate('\'stores\' is deprecated as a property directly on the ' + this.$className + ' prototype. Please move it ' +
-                'to Ext.application({ stores: ... }) instead');
-            // </debug>
-
             for (i = 0; i < length; i++) {
                 functionName = format("get{0}Store", Ext.String.capitalize(stores[i]));
 
@@ -679,12 +679,6 @@ Ext.define('Ext.app.Controller', {
         if (views) {
             length = views.length;
             config.views = views;
-
-            // <debug warn>
-            Ext.Logger.deprecate('\'views\' is deprecated as a property directly on the ' + this.$className + ' prototype. Please move it ' +
-                'to Ext.application({ views: ... }) instead');
-            // </debug>
-
             for (i = 0; i < length; i++) {
                 functionName = format("get{0}View", views[i]);
 

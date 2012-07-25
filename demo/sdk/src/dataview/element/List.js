@@ -81,7 +81,7 @@ Ext.define('Ext.dataview.element.List', {
 
         if (hasDisclosureProperty) {
             disclosureEl = extItem.down(me.disclosureClsCache);
-            disclosureEl[data[disclosureProperty] === false ? 'removeCls' : 'addCls'](me.hiddenDisplayCache);
+            disclosureEl[data[disclosureProperty] === false ? 'addCls' : 'removeCls'](me.hiddenDisplayCache);
         }
 
         if (dataview.getIcon()) {
@@ -101,7 +101,7 @@ Ext.define('Ext.dataview.element.List', {
         for (; i < existingHeadersLn; i++) {
             item = existingHeaders[i];
             Ext.fly(item.parentNode).removeCls(headerClsShortCache);
-            Ext.removeNode(item);
+            Ext.get(item).destroy();
         }
     },
 

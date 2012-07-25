@@ -19,7 +19,9 @@ var ExtObject = Ext.Object = {
      * Returns a new object with the given object as the prototype chain.
      * @param {Object} object The prototype chain for the new object.
      */
-    chain: function (object) {
+    chain: ('create' in Object) ? function(object){
+        return Object.create(object);
+    } : function (object) {
         TemplateClass.prototype = object;
         var result = new TemplateClass();
         TemplateClass.prototype = null;
@@ -31,7 +33,7 @@ var ExtObject = Ext.Object = {
      * query strings. For example:
      *
      * Non-recursive:
-     * 
+     *
      *     var objects = Ext.Object.toQueryObjects('hobbies', ['reading', 'cooking', 'swimming']);
      *
      *     // objects then equals:
@@ -521,8 +523,8 @@ var ExtObject = Ext.Object = {
      * @private
      */
     classify: function(object) {
-        var prototype = object,
-            objectProperties = [],
+        var objectProperties = [],
+            arrayProperties = [],
             propertyClassesMap = {},
             objectClass = function() {
                 var i = 0,
@@ -533,21 +535,35 @@ var ExtObject = Ext.Object = {
                     property = objectProperties[i];
                     this[property] = new propertyClassesMap[property];
                 }
+
+                ln = arrayProperties.length;
+
+                for (i = 0; i < ln; i++) {
+                    property = arrayProperties[i];
+                    this[property] = object[property].slice();
+                }
             },
-            key, value;
+            key, value, constructor;
 
         for (key in object) {
             if (object.hasOwnProperty(key)) {
                 value = object[key];
 
-                if (value && value.constructor === Object) {
-                    objectProperties.push(key);
-                    propertyClassesMap[key] = ExtObject.classify(value);
+                if (value) {
+                    constructor = value.constructor;
+
+                    if (constructor === Object) {
+                        objectProperties.push(key);
+                        propertyClassesMap[key] = ExtObject.classify(value);
+                    }
+                    else if (constructor === Array) {
+                        arrayProperties.push(key);
+                    }
                 }
             }
         }
 
-        objectClass.prototype = prototype;
+        objectClass.prototype = object;
 
         return objectClass;
     },

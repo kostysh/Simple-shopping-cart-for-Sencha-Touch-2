@@ -1435,6 +1435,9 @@ Ext.define('Ext.event.publisher.Dom', {
     onEvent: function(e) {
         var eventName = this.eventNameMap[e.type];
 
+        // Set the current frame start time to be the timestamp of the event.
+        Ext.frameStartTime = event.timeStamp;
+
         if (!eventName || this.getSubscribersCount(eventName) === 0) {
             return;
         }
@@ -2566,6 +2569,10 @@ Ext.define('Ext.event.recognizer.DoubleTap', {
 
     extend: 'Ext.event.recognizer.SingleTouch',
 
+    inheritableStatics: {
+        DIFFERENT_TARGET: 0x03
+    },
+
     config: {
         maxDuration: 300
     },
@@ -2592,12 +2599,17 @@ Ext.define('Ext.event.recognizer.DoubleTap', {
 
     singleTapTimer: null,
 
+    startTime: 0,
+
+    lastTapTime: 0,
+
     onTouchStart: function(e) {
         if (this.callParent(arguments) === false) {
             return false;
         }
 
         this.startTime = e.time;
+
         clearTimeout(this.singleTapTimer);
     },
 
@@ -2610,15 +2622,23 @@ Ext.define('Ext.event.recognizer.DoubleTap', {
             maxDuration = this.getMaxDuration(),
             touch = e.changedTouches[0],
             time = e.time,
+            target = e.target,
             lastTapTime = this.lastTapTime,
+            lastTarget = this.lastTarget,
             duration;
 
         this.lastTapTime = time;
+        this.lastTarget = target;
 
         if (lastTapTime) {
             duration = time - lastTapTime;
 
             if (duration <= maxDuration) {
+                if (target !== lastTarget) {
+                    return this.fail(this.self.DIFFERENT_TARGET);
+                }
+
+                this.lastTarget = null;
                 this.lastTapTime = 0;
 
                 this.fire('doubletap', e, [touch], {
@@ -4088,6 +4108,26 @@ Ext.define('Ext.mixin.Observable', {
      * Fires the specified event with the passed parameters (minus the event name, plus the `options` object passed
      * to {@link #addListener}).
      *
+     * The first argument is the name of the event. Every other argument passed will be available when you listen for 
+     * the event.
+     *
+     * ## Example
+     *
+     * Firstly, we set up a listener for our new event.
+     *     
+     *     this.on('myevent', function(arg1, arg2, arg3, arg4, options, e) {
+     *         console.log(arg1); // true
+     *         console.log(arg2); // 2
+     *         console.log(arg3); // { test: 'foo' }
+     *         console.log(arg4); // 14
+     *         console.log(options); // the options added when adding the listener
+     *         console.log(e); // the event object with information about the event
+     *     });
+     *
+     * And then we can fire off the event.
+     * 
+     *     this.fireEvent('myevent', true, 2, { test: 'foo' }, 14);
+     *
      * An event may be set to bubble up an Observable parent hierarchy by calling {@link #enableBubble}.
      *
      * @param {String} eventName The name of the event to fire.
@@ -4870,7 +4910,7 @@ Ext.define('Ext.XTemplateParser', {
      * @param {Object} actions The other actions keyed by the attribute name (such as 'exec').
      * @method doEnd
      */
-    // doEnd: function (type, actions)
+    // doEnd: function (type, actions) 
 
     /**
      * This method is called to process `<tpl for="action">`. If there are other attributes,
@@ -4903,7 +4943,8 @@ Ext.define('Ext.XTemplateParser', {
             aliases = { elseif: 'elif' },
             topRe = me.topRe,
             actionsRe = me.actionsRe,
-            index, stack, s, m, t, prev, frame, subMatch, begin, end, actions;
+            index, stack, s, m, t, prev, frame, subMatch, begin, end, actions,
+            prop;
 
         me.level = 0;
         me.stack = stack = [];
@@ -4934,7 +4975,7 @@ Ext.define('Ext.XTemplateParser', {
                 end += 2;
             } else if (m[3]) { // if ('{' token)
                 me.doTag(m[3]);
-            } else if (m[4]) { // content of a <tpl xxxxxx> tag
+            } else if (m[4]) { // content of a <tpl xxxxxx xxx> tag
                 actions = null;
                 while ((subMatch = actionsRe.exec(m[4])) !== null) {
                     s = subMatch[2] || subMatch[3];
@@ -4966,11 +5007,11 @@ Ext.define('Ext.XTemplateParser', {
                     }
                 }
                 else if (actions['if']) {
-                    me.doIf(actions['if'], actions)
+                    me.doIf(actions['if'], actions);
                     stack.push({ type: 'if' });
                 }
                 else if (actions['switch']) {
-                    me.doSwitch(actions['switch'], actions)
+                    me.doSwitch(actions['switch'], actions);
                     stack.push({ type: 'switch' });
                 }
                 else if (actions['case']) {
@@ -4981,6 +5022,11 @@ Ext.define('Ext.XTemplateParser', {
                 }
                 else if (actions['for']) {
                     ++me.level;
+
+                    // Extract property name to use from indexed item
+                    if (prop = me.propRe.exec(m[4])) {
+                        actions.propName = prop[1] || prop[2];
+                    }
                     me.doFor(actions['for'], actions);
                     stack.push({ type: 'for', actions: actions });
                 }
@@ -4992,7 +5038,11 @@ Ext.define('Ext.XTemplateParser', {
                 else {
                     // todo - error
                 }
-                /**/
+                */
+            } else if (m[0].length === 5) {
+                // if the length of m[0] is 5, assume that we're dealing with an opening tpl tag with no attributes (e.g. <tpl>...</tpl>)
+                // in this case no action is needed other than pushing it on to the stack
+                stack.push({ type: 'tpl' });
             } else {
                 frame = stack.pop();
                 me.doEnd(frame.type, frame.actions);
@@ -5004,12 +5054,14 @@ Ext.define('Ext.XTemplateParser', {
     },
 
     // Internal regexes
-
+    
     topRe:     /(?:(\{\%)|(\{\[)|\{([^{}]*)\})|(?:<tpl([^>]*)\>)|(?:<\/tpl>)/g,
-    actionsRe: /\s*(elif|elseif|if|for|exec|switch|case|eval)\s*\=\s*(?:(?:["]([^"]*)["])|(?:[']([^']*)[']))\s*/g,
+    actionsRe: /\s*(elif|elseif|if|for|exec|switch|case|eval)\s*\=\s*(?:(?:"([^"]*)")|(?:'([^']*)'))\s*/g,
+    propRe:    /prop=(?:(?:"([^"]*)")|(?:'([^']*)'))/,
     defaultRe: /^\s*default\s*$/,
     elseRe:    /^\s*else\s*$/
 });
+
 /**
  * @private
  */
@@ -5150,7 +5202,9 @@ Ext.define('Ext.Evented', {
                     }
                     else {
                         this[internalName] = value;
-                        this[doSetName].call(this, value, oldValue);
+                        if (this[doSetName]) {
+                            this[doSetName].call(this, value, oldValue);
+                        }
                     }
                 }
 
@@ -5175,7 +5229,9 @@ Ext.define('Ext.Evented', {
         var nameMap = options.nameMap;
 
         me[nameMap.internal] = value;
-        me[nameMap.doSet].call(this, value, oldValue);
+        if (me[nameMap.doSet]) {
+          me[nameMap.doSet].call(this, value, oldValue);
+        }
     },
 
     onClassExtended: function(Class, data) {
@@ -5416,6 +5472,11 @@ Ext.define('Ext.XTemplateCompiler', {
     // IE and Opera are also fine with the "new Function" technique.
     useEval: Ext.isGecko,
 
+    // See http://jsperf.com/nige-array-append for quickest way to append to an array of unknown length
+    // (Due to arbitrary code execution inside a template, we cannot easily track the length in  var)
+    // On IE6 and 7 myArray[myArray.length]='foo' is better. On other browsers myArray.push('foo') is better.
+    useIndex: Ext.isIE6 || Ext.isIE7,
+
     useFormat: true,
 
     propNameRe: /^[\w\d\$]*$/,
@@ -5432,25 +5493,43 @@ Ext.define('Ext.XTemplateCompiler', {
     },
 
     generate: function (tpl) {
-        var me = this;
+        var me = this,
+            // note: Ext here is properly sandboxed
+            definitions = 'var fm=Ext.util.Format,ts=Object.prototype.toString;',
+            code;
+
+        // Track how many levels we use, so that we only "var" each level's variables once
+        me.maxLevel = 0;
 
         me.body = [
-            'var c0=values, p0=parent, n0=xcount, i0=xindex;\n'
+            'var c0=values, a0=' + me.createArrayTest(0) + ', p0=parent, n0=xcount, i0=xindex, v;\n'
         ];
-        me.funcs = [
-            'var fm=Ext.util.Format;' // note: Ext here is properly sandboxed
-        ];
+        if (me.definitions) {
+            if (typeof me.definitions === 'string') {
+                me.definitions = [me.definitions, definitions ];
+            } else {
+                me.definitions.push(definitions);
+            }
+        } else {
+            me.definitions = [ definitions ];
+        }
         me.switches = [];
 
         me.parse(tpl);
 
-        me.funcs.push(
+        me.definitions.push(
             (me.useEval ? '$=' : 'return') + ' function (' + me.fnArgs + ') {',
                 me.body.join(''),
             '}'
         );
 
-        var code = me.funcs.join('\n');
+        code = me.definitions.join('\n');
+
+        // Free up the arrays.
+        me.definitions.length = me.body.length = me.switches.length = 0;
+        delete me.definitions;
+        delete me.body;
+        delete me.switches;
 
         return code;
     },
@@ -5459,13 +5538,28 @@ Ext.define('Ext.XTemplateCompiler', {
     // XTemplateParser callouts
 
     doText: function (text) {
-        text = text.replace(this.aposRe, "\\'");
-        text = text.replace(this.newLineRe, '\\n');
-        this.body.push('out.push(\'', text, '\')\n');
+        var me = this,
+            out = me.body;
+
+        text = text.replace(me.aposRe, "\\'").replace(me.newLineRe, '\\n');
+        if (me.useIndex) {
+            out.push('out[out.length]=\'', text, '\'\n');
+        } else {
+            out.push('out.push(\'', text, '\')\n');
+        }
     },
 
     doExpr: function (expr) {
-        this.body.push('out.push(String(', expr, '))\n');
+        var out = this.body;
+        out.push('if ((v=' + expr + ')!==undefined) out');
+
+        // Coerce value to string using concatenation of an empty string literal.
+        // See http://jsperf.com/tostringvscoercion/5
+        if (this.useIndex) {
+             out.push('[out.length]=v+\'\'\n');
+        } else {
+             out.push('.push(v+\'\')\n');
+        }
     },
 
     doTag: function (tag) {
@@ -5484,7 +5578,9 @@ Ext.define('Ext.XTemplateCompiler', {
         var me = this;
 
         // If it's just a propName, use it directly in the if
-        if (me.propNameRe.test(action)) {
+        if (action === '.') {
+            me.body.push('if (values) {\n');
+        } else if (me.propNameRe.test(action)) {
             me.body.push('if (', me.parseTag(action), ') {\n');
         }
         // Otherwise, it must be an expression, and needs to be returned from an fn which uses with(values)
@@ -5500,7 +5596,9 @@ Ext.define('Ext.XTemplateCompiler', {
         var me = this;
 
         // If it's just a propName, use it directly in the else if
-        if (me.propNameRe.test(action)) {
+        if (action === '.') {
+            me.body.push('else if (values) {\n');
+        } else if (me.propNameRe.test(action)) {
             me.body.push('} else if (', me.parseTag(action), ') {\n');
         }
         // Otherwise, it must be an expression, and needs to be returned from an fn which uses with(values)
@@ -5516,7 +5614,9 @@ Ext.define('Ext.XTemplateCompiler', {
         var me = this;
 
         // If it's just a propName, use it directly in the switch
-        if (me.propNameRe.test(action)) {
+        if (action === '.') {
+            me.body.push('switch (values) {\n');
+        } else if (me.propNameRe.test(action)) {
             me.body.push('switch (', me.parseTag(action), ') {\n');
         }
         // Otherwise, it must be an expression, and needs to be returned from an fn which uses with(values)
@@ -5591,46 +5691,104 @@ Ext.define('Ext.XTemplateCompiler', {
 
     doFor: function (action, actions) {
         var me = this,
-            s = me.addFn(action),
+            s,
             L = me.level,
-            up = L-1;
+            up = L-1,
+            pL = 'p' + L,
+            parentAssignment;
+
+        // If it's just a propName, use it directly in the switch
+        if (action === '.') {
+            s = 'values';
+        } else if (me.propNameRe.test(action)) {
+            s = me.parseTag(action);
+        }
+        // Otherwise, it must be an expression, and needs to be returned from an fn which uses with(values)
+        else {
+            s = me.addFn(action) + me.callFn;
+        }
 
         /*
         We are trying to produce a block of code that looks like below. We use the nesting
         level to uniquely name the control variables.
 
-            var c2 = f5.call(this, out, values, parent, xindex, xcount),
+            // Omit "var " if we have already been through level 2
+            var i2 = 0,
+                n2 = 0,
+                c2 = values['propName'],
                     // c2 is the context object for the for loop
-                a2 = Ext.isArray(c2),
-                    // a2 is the isArray result for the context
-                p2 = (parent=c1),
+                a2 = Array.isArray(c2);
+                p2 = c1,
                     // p2 is the parent context (of the outer for loop)
                 r2 = values
                     // r2 is the values object to
 
+            // If iterating over the current data, the parent is always set to c2
+            parent = c2;
+            // If iterating over a property in an object, set the parent to the object
+            parent = a1 ? c1[i1] : p2 // set parent
+            if (c2) {
+                if (a2) {
+                    n2 = c2.length;
+                } else if (c2.isMixedCollection) {
+                    c2 = c2.items;
+                    n2 = c2.length;
+                } else if (c2.isStore) {
+                    c2 = c2.data.items;
+                    n2 = c2.length;
+                } else {
+                    c2 = [ c2 ];
+                    n2 = 1;
+                }
+            }
             // i2 is the loop index and n2 is the number (xcount) of this for loop
-            for (var i2 = 0, n2 = a2 ? c2.length : (c2 ? 1 : 0), xcount = n2; i2 < n2; ++i2) {
-                values=a2?c2[i2]:c2   // adjust special vars to inner scope
-                xindex=i2+1           // xindex is 1-based
+            for (xcount = n2; i2 < n2; ++i2) {
+                values = c2[i2]           // adjust special vars to inner scope
+                xindex = i2 + 1           // xindex is 1-based
 
         The body of the loop is whatever comes between the tpl and /tpl statements (which
         is handled by doEnd).
         */
 
-        me.body.push('var c',L,'=',s,me.callFn,', a',L,'=Ext.isArray(c',L,'),p',L,'=(parent=c',up,'),r',L,'=values\n',
-            'for (var i',L,'=0,n',L,'=a',L,'?c',L,'.length:(c',L,'?1:0), xcount=n',L,';i',L,'<n'+L+';++i',L,'){\n',
-            'values=a',L,'?c',L,'[i',L,']:c',L,'\n',
+        // Declare the vars for a particular level only if we have not already declared them.
+        if (me.maxLevel < L) {
+            me.maxLevel = L;
+            me.body.push('var ');
+        }
+
+        if (action == '.') {
+            parentAssignment = 'c' + L;
+        } else {
+            parentAssignment = 'a' + up + '?c' + up + '[i' + up + ']:p' + L;
+        }
+
+        me.body.push('i',L,'=0,n', L, '=0,c',L,'=',s,',a',L,'=', me.createArrayTest(L), ',p',L,'=c',up,',r',L,'=values;\n',
+            'parent=',parentAssignment,'\n',
+            'if (c',L,'){if(a',L,'){n', L,'=c', L, '.length;}else if (c', L, '.isMixedCollection){c',L,'=c',L,'.items;n',L,'=c',L,'.length;}else if(c',L,'.isStore){c',L,'=c',L,'.data.items;n',L,'=c',L,'.length;}else{c',L,'=[c',L,'];n',L,'=1;}}\n',
+            'for (xcount=n',L,';i',L,'<n'+L+';++i',L,'){\n',
+            'values=c',L,'[i',L,']');
+        if (actions.propName) {
+            me.body.push('.', actions.propName);
+        }
+        me.body.push('\n',
             'xindex=i',L,'+1\n');
+    },
+
+    createArrayTest: ('isArray' in Array) ? function(L) {
+        return 'Array.isArray(c' + L + ')';
+    } : function(L) {
+        return 'ts.call(c' + L + ')==="[object Array]"';
     },
 
     doExec: function (action, actions) {
         var me = this,
-            name = 'f' + me.funcs.length;
+            name = 'f' + me.definitions.length;
 
-        me.funcs.push('function ' + name + '(' + me.fnArgs + ') {',
+        me.definitions.push('function ' + name + '(' + me.fnArgs + ') {',
                             ' try { with(values) {',
                             '  ' + action,
-                            ' }} catch(e) {}',
+                            ' }} catch(e) {',
+                            '}',
                       '}');
 
         me.body.push(name + me.callFn + '\n');
@@ -5641,21 +5799,22 @@ Ext.define('Ext.XTemplateCompiler', {
 
     addFn: function (body) {
         var me = this,
-            name = 'f' + me.funcs.length;
+            name = 'f' + me.definitions.length;
 
         if (body === '.') {
-            me.funcs.push('function ' + name + '(' + me.fnArgs + ') {',
+            me.definitions.push('function ' + name + '(' + me.fnArgs + ') {',
                             ' return values',
                        '}');
         } else if (body === '..') {
-            me.funcs.push('function ' + name + '(' + me.fnArgs + ') {',
+            me.definitions.push('function ' + name + '(' + me.fnArgs + ') {',
                             ' return parent',
                        '}');
         } else {
-            me.funcs.push('function ' + name + '(' + me.fnArgs + ') {',
+            me.definitions.push('function ' + name + '(' + me.fnArgs + ') {',
                             ' try { with(values) {',
                             '  return(' + body + ')',
-                            ' }} catch(e) {}',
+                            ' }} catch(e) {',
+                            '}',
                        '}');
         }
 
@@ -5663,7 +5822,8 @@ Ext.define('Ext.XTemplateCompiler', {
     },
 
     parseTag: function (tag) {
-        var m = this.tagRe.exec(tag),
+        var me = this,
+            m = me.tagRe.exec(tag),
             name = m[1],
             format = m[2],
             args = m[3],
@@ -5673,7 +5833,11 @@ Ext.define('Ext.XTemplateCompiler', {
         // name = "." - Just use the values object.
         if (name == '.') {
             // filter to not include arrays/objects/nulls
-            v = 'Ext.Array.indexOf(["string", "number", "boolean"], typeof values) > -1 || Ext.isDate(values) ? values : ""';
+            if (!me.validTypes) {
+                me.definitions.push('var validTypes={string:1,number:1,boolean:1};');
+                me.validTypes = true;
+            }
+            v = 'validTypes[typeof values] || ts.call(values) === "[object Date]" ? values : ""';
         }
         // name = "#" - Use the xindex
         else if (name == '#') {
@@ -5682,12 +5846,12 @@ Ext.define('Ext.XTemplateCompiler', {
         else if (name.substr(0, 7) == "parent.") {
             v = name;
         }
-        // name has a . in it - Use object literal notation, starting from values
-        else if ((name.indexOf('.') !== -1) && (name.indexOf('-') === -1)) {
-
+        // compound Javascript property name (e.g., "foo.bar")
+        else if (isNaN(name) && name.indexOf('-') == -1 && name.indexOf('.') != -1) {
             v = "values." + name;
         }
-        // name is a property of values
+        // number or a '-' in it or a single word (maybe a keyword): use array notation
+        // (http://jsperf.com/string-property-access/4)
         else {
             v = "values['" + name + "']";
         }
@@ -5696,7 +5860,7 @@ Ext.define('Ext.XTemplateCompiler', {
             v = '(' + v + math + ')';
         }
 
-        if (format && this.useFormat) {
+        if (format && me.useFormat) {
             args = args ? ',' + args : "";
             if (format.substr(0, 5) != "this.") {
                 format = "fm." + format + '(';
@@ -5704,8 +5868,7 @@ Ext.define('Ext.XTemplateCompiler', {
                 format += '(';
             }
         } else {
-            args = '';
-            format = "(" + v + " === undefined ? '' : ";
+            return v;
         }
 
         return format + v + args + ')';
@@ -5725,14 +5888,14 @@ Ext.define('Ext.XTemplateCompiler', {
     newLineRe: /\r\n|\r|\n/g,
     aposRe: /[']/g,
     intRe:  /^\s*(\d+)\s*$/,
-    tagRe:  /([\w-\.\#]+)(?:\:([\w\.]*)(?:\((.*?)?\))?)?(\s?[\+\-\*\/]\s?[\d\.\+\-\*\/\(\)]+)?/
-
+    tagRe:  /([\w-\.\#\$]+)(?:\:([\w\.]*)(?:\((.*?)?\))?)?(\s?[\+\-\*\/]\s?[\d\.\+\-\*\/\(\)]+)?/
 }, function () {
     var proto = this.prototype;
 
     proto.fnArgs = 'out,values,parent,xindex,xcount';
     proto.callFn = '.call(this,' + proto.fnArgs + ')';
 });
+
 /**
  * @class Ext.Date
  * @mixins Ext.DateExtras
@@ -5991,9 +6154,7 @@ Ext.Date.parseFunctions['x-date-format'] = myDateParser;
      * may be used as a format string to {@link #format}. Example:</p><pre><code>
 Ext.Date.formatFunctions['x-date-format'] = myDateFormatter;
 </code></pre>
-     * <p>A formatting function should return a string representation of the passed Date object, and is passed the following parameters:<div class="mdetail-params"><ul>
-     * <li><code>date</code> : Date<div class="sub-desc">The Date to format.</div></li>
-     * </ul></div></p>
+     * <p>A formatting function should return a string representation of the Date object which is the scope (this) of the function.</p>
      * <p>To enable date strings to also be <i>parsed</i> according to that format, a corresponding
      * parsing function must be placed into the {@link #parseFunctions} property.
      * @property formatFunctions
@@ -6368,6 +6529,8 @@ dt = Ext.Date.parse("2006-02-29 03:20:01", "Y-m-d H:i:s", true); // returns null
             } else if (special) {
                 special = false;
                 code.push("'" + Ext.String.escape(ch) + "'");
+            } else if (ch == '\n') {
+                code.push(Ext.JSON.encode(ch));
             } else {
                 code.push(utilDate.getFormatCode(ch));
             }
@@ -7008,25 +7171,24 @@ console.log(dt2); //returns 'Tue Sep 26 2006 00:00:00'
      * @return {Date} The new Date instance.
      */
     add : function(date, interval, value) {
-        var d = Ext.Date.clone(date),
-            Date = Ext.Date;
+        var d = Ext.Date.clone(date);
         if (!interval || value === 0) return d;
 
         switch(interval.toLowerCase()) {
             case Ext.Date.MILLI:
-                d.setMilliseconds(d.getMilliseconds() + value);
+                d= new Date(d.valueOf() + value);
                 break;
             case Ext.Date.SECOND:
-                d.setSeconds(d.getSeconds() + value);
+                d= new Date(d.valueOf() + value * 1000);
                 break;
             case Ext.Date.MINUTE:
-                d.setMinutes(d.getMinutes() + value);
+                d= new Date(d.valueOf() + value * 60000);
                 break;
             case Ext.Date.HOUR:
-                d.setHours(d.getHours() + value);
+                d= new Date(d.valueOf() + value * 3600000);
                 break;
             case Ext.Date.DAY:
-                d.setDate(d.getDate() + value);
+                d= new Date(d.valueOf() + value * 86400000);
                 break;
             case Ext.Date.MONTH:
                 var day = date.getDate();
@@ -7053,6 +7215,104 @@ console.log(dt2); //returns 'Tue Sep 26 2006 00:00:00'
     between : function(date, start, end) {
         var t = date.getTime();
         return start.getTime() <= t && t <= end.getTime();
+    },
+
+    /**
+     * Calculate how many units are there between two time.
+     * @param {Date} min The first time
+     * @param {Date} max The second time
+     * @param {String} unit The unit. This unit is compatible with the date interval constants.
+     * @return {Number} The maximum number n of units that min + n * unit <= max
+     */
+    diff: function (min, max, unit) {
+        var ExtDate = Ext.Date, est, diff = +max - min;
+        switch (unit) {
+            case ExtDate.MILLI:
+                return diff;
+            case ExtDate.SECOND:
+                return Math.floor(diff / 1000);
+            case ExtDate.MINUTE:
+                return Math.floor(diff / 60000);
+            case ExtDate.HOUR:
+                return Math.floor(diff / 3600000);
+            case ExtDate.DAY:
+                return Math.floor(diff / 86400000);
+            case 'w':
+                return Math.floor(diff / 604800000);
+            case ExtDate.MONTH:
+                est = (max.getFullYear() * 12 + max.getMonth()) - (min.getFullYear() * 12 + min.getMonth());
+                if (Ext.Date.add(min, unit, est) > max) {
+                    return est - 1;
+                } else {
+                    return est;
+                }
+            case ExtDate.YEAR:
+                est = max.getFullYear() - min.getFullYear();
+                if (Ext.Date.add(min, unit, est) > max) {
+                    return est - 1;
+                } else {
+                    return est;
+                }
+        }
+    },
+
+    /**
+     * Align the date to `unit`
+     * @param {Date} date The date to be aligned
+     * @param {String} unit The unit. This unit is compatible with the date interval constants.
+     * @return {Date} The aligned date.
+     */
+    align: function (date, unit, step) {
+        var num = new Date(+date);
+        switch (unit.toLowerCase()) {
+            case Ext.Date.MILLI:
+                return num;
+                break;
+            case Ext.Date.SECOND:
+                num.setUTCSeconds(num.getUTCSeconds() - num.getUTCSeconds() % step);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.MINUTE:
+                num.setUTCMinutes(num.getUTCMinutes() - num.getUTCMinutes() % step);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.HOUR:
+                num.setUTCHours(num.getUTCHours() - num.getUTCHours() % step);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.DAY:
+                if (step == 7 || step == 14){
+                    num.setUTCDate(num.getUTCDate() - num.getUTCDay() + 1);
+                }
+                num.setUTCHours(0);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.MONTH:
+                num.setUTCMonth(num.getUTCMonth() - (num.getUTCMonth() - 1) % step,1);
+                num.setUTCHours(0);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.YEAR:
+                num.setUTCFullYear(num.getUTCFullYear() - num.getUTCFullYear() % step, 1, 1);
+                num.setUTCHours(0);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return date;
+                break;
+        }
     }
 };
 
@@ -7324,7 +7584,7 @@ Ext.define('Ext.Template', {
 
     /**
      * Creates new template.
-     *
+     * 
      * @param {String...} html List of strings to be concatenated into template.
      * Alternatively an array of strings can be given, but then no config object may be passed.
      * @param {Object} config (optional) Config object
@@ -7338,6 +7598,14 @@ Ext.define('Ext.Template', {
             value;
 
         me.initialConfig = {};
+        
+        // Allow an array to be passed here so we can
+        // pass an array of strings and an object
+        // at the end
+        if (length === 1 && Ext.isArray(html)) {
+            args = html;
+            length = args.length;
+        }
 
         if (length > 1) {
             for (; i < length; i++) {
@@ -7349,13 +7617,8 @@ Ext.define('Ext.Template', {
                     buffer.push(value);
                 }
             }
-            html = buffer.join('');
         } else {
-            if (Ext.isArray(html)) {
-                buffer.push(html.join(''));
-            } else {
-                buffer.push(html);
-            }
+            buffer.push(html);
         }
 
         // @private
@@ -7368,7 +7631,7 @@ Ext.define('Ext.Template', {
 
     /**
      * @property {Boolean} isTemplate
-     * `true` in this class to identify an objact as an instantiated Template, or subclass thereof.
+     * `true` in this class to identify an object as an instantiated Template, or subclass thereof.
      */
     isTemplate: true,
 
@@ -7563,10 +7826,9 @@ Ext.define('Ext.Template', {
         return this.doInsert('beforeEnd', el, values, returnElement);
     },
 
-    doInsert: function(where, el, values, returnEl) {
-        el = Ext.getDom(el);
-        var newNode = Ext.DomHelper.insertHtml(where, el, this.apply(values));
-        return returnEl ? Ext.get(newNode, true) : newNode;
+    doInsert: function(where, el, values, returnElement) {
+        var newNode = Ext.DomHelper.insertHtml(where, Ext.getDom(el), this.apply(values));
+        return returnElement ? Ext.get(newNode) : newNode;
     },
 
     /**
@@ -7578,11 +7840,11 @@ Ext.define('Ext.Template', {
      * @return {HTMLElement/Ext.Element} The new node or Element
      */
     overwrite: function(el, values, returnElement) {
-        el = Ext.getDom(el);
-        el.innerHTML = this.apply(values);
-        return returnElement ? Ext.get(el.firstChild, true) : el.firstChild;
+        var newNode = Ext.DomHelper.overwrite(Ext.getDom(el), this.apply(values));
+        return returnElement ? Ext.get(newNode) : newNode;
     }
 });
+
 /**
  * A template class that supports advanced functionality like:
  *
@@ -7849,6 +8111,11 @@ Ext.define('Ext.XTemplate', {
     requires: 'Ext.XTemplateCompiler',
 
     /**
+     * @private
+     */
+    emptyObj: {},
+
+    /**
      * @cfg {Boolean} compiled
      * Only applies to {@link Ext.Template}, XTemplates are compiled automatically on the
      * first call to {@link #apply} or {@link #applyOut}.
@@ -7858,20 +8125,21 @@ Ext.define('Ext.XTemplate', {
         return this.applyOut(values, []).join('');
     },
 
-    applyOut: function(values, out) {
+    applyOut: function(values, out, parent) {
         var me = this,
             compiler;
 
         if (!me.fn) {
             compiler = new Ext.XTemplateCompiler({
-                useFormat: me.disableFormats !== true
+                useFormat: me.disableFormats !== true,
+                definitions: me.definitions
             });
 
             me.fn = compiler.compile(me.html);
         }
 
         try {
-            me.fn.call(me, out, values, {}, 1, 1);
+            me.fn.call(me, out, values, parent || me.emptyObj, 1, 1);
         } catch (e) {
         }
 
@@ -8067,6 +8335,8 @@ Ext.define('Ext.util.SizeMonitor', {
     },
 
     destroy: function() {
+        clearTimeout(this.sizeChangeThrottleTimer);
+
         this.callParent(arguments);
 
         this.destroyDetector('expand');
@@ -8125,8 +8395,6 @@ Ext.define('Ext.util.translatable.Abstract', {
     requires: ['Ext.fx.easing.Linear'],
 
     config: {
-        element: null,
-
         easing: null,
 
         easingX: null,
@@ -8160,38 +8428,22 @@ Ext.define('Ext.util.translatable.Abstract', {
      * @param {Number} y The current translation on the y axis
      */
 
-    constructor: function(config) {
-        var element;
+    x: 0,
 
+    y: 0,
+
+    activeEasingX: null,
+
+    activeEasingY: null,
+
+    isAnimating: false,
+
+    isTranslatable: true,
+
+    constructor: function(config) {
         this.doAnimationFrame = Ext.Function.bind(this.doAnimationFrame, this);
 
-        this.x = 0;
-
-        this.y = 0;
-
-        this.activeEasingX = null;
-
-        this.activeEasingY = null;
-
-        this.initialConfig = config;
-
-        if (config && config.element) {
-            element = config.element;
-            this.setElement(element);
-        }
-    },
-
-    applyElement: function(element) {
-        if (!element) {
-            return;
-        }
-
-        return Ext.get(element);
-    },
-
-    updateElement: function(element) {
-        this.initConfig(this.initialConfig);
-        this.refresh();
+        this.initConfig(config);
     },
 
     factoryEasing: function(easing) {
@@ -8220,7 +8472,17 @@ Ext.define('Ext.util.translatable.Abstract', {
         this.animationInterval = 1000 / fps;
     },
 
-    doTranslate: function(x, y) {
+    doTranslate: Ext.emptyFn,
+
+    translate: function(x, y, animation) {
+        if (animation) {
+            return this.translateAnimated(x, y, animation);
+        }
+
+        if (this.isAnimating) {
+            this.stopAnimation();
+        }
+
         if (typeof x == 'number') {
             this.x = x;
         }
@@ -8229,24 +8491,20 @@ Ext.define('Ext.util.translatable.Abstract', {
             this.y = y;
         }
 
-        return this;
+        return this.doTranslate(x, y);
     },
 
-    translate: function(x, y, animation) {
-        if (!this.getElement().dom) {
-            return;
-        }
-        if (Ext.isObject(x)) {
-            throw new Error();
-        }
+    translateAxis: function(axis, value, animation) {
+        var x, y;
 
-        this.stopAnimation();
-
-        if (animation) {
-            return this.translateAnimated(x, y, animation);
+        if (axis == 'x') {
+            x = value;
+        }
+        else {
+            y = value;
         }
 
-        return this.doTranslate(x, y);
+        return this.translate(x, y, animation);
     },
 
     animate: function(easingX, easingY) {
@@ -8262,18 +8520,18 @@ Ext.define('Ext.util.translatable.Abstract', {
     },
 
     translateAnimated: function(x, y, animation) {
-        if (Ext.isObject(x)) {
-            throw new Error();
-        }
-
         if (!Ext.isObject(animation)) {
             animation = {};
         }
 
+        if (this.isAnimating) {
+            this.stopAnimation();
+        }
+
         var now = Ext.Date.now(),
             easing = animation.easing,
-            easingX = (typeof x == 'number') ? (animation.easingX || this.getEasingX() || easing || true) : null,
-            easingY = (typeof y == 'number') ? (animation.easingY || this.getEasingY() || easing || true) : null;
+            easingX = (typeof x == 'number') ? (animation.easingX || easing || this.getEasingX() || true) : null,
+            easingY = (typeof y == 'number') ? (animation.easingY || easing || this.getEasingY() || true) : null;
 
         if (easingX) {
             easingX = this.factoryEasing(easingX);
@@ -8303,10 +8561,9 @@ Ext.define('Ext.util.translatable.Abstract', {
     doAnimationFrame: function() {
         var easingX = this.activeEasingX,
             easingY = this.activeEasingY,
-            element = this.getElement(),
             x, y;
 
-        if (!this.isAnimating || !element.dom) {
+        if (!this.isAnimating) {
             return;
         }
 
@@ -8359,6 +8616,37 @@ Ext.define('Ext.util.translatable.Abstract', {
 
     refresh: function() {
         this.translate(this.x, this.y);
+    },
+
+    destroy: function() {
+        if (this.isAnimating) {
+            this.stopAnimation();
+        }
+
+        this.callParent(arguments);
+    }
+});
+
+/**
+ * @private
+ */
+Ext.define('Ext.util.translatable.Dom', {
+    extend: 'Ext.util.translatable.Abstract',
+
+    config: {
+        element: null
+    },
+
+    applyElement: function(element) {
+        if (!element) {
+            return;
+        }
+
+        return Ext.get(element);
+    },
+
+    updateElement: function() {
+        this.refresh();
     }
 });
 
@@ -8368,22 +8656,10 @@ Ext.define('Ext.util.translatable.Abstract', {
  * CSS Transform implementation
  */
 Ext.define('Ext.util.translatable.CssTransform', {
-    extend: 'Ext.util.translatable.Abstract',
+    extend: 'Ext.util.translatable.Dom',
 
-    doTranslate: function(x, y) {
-        var domStyle = this.getElement().dom.style;
-
-        if (typeof x != 'number') {
-            x = this.x;
-        }
-
-        if (typeof y != 'number') {
-            y = this.y;
-        }
-
-        domStyle.webkitTransform = 'translate3d(' + x + 'px, ' + y + 'px, 0px)';
-
-        return this.callParent(arguments);
+    doTranslate: function() {
+        this.getElement().dom.style.webkitTransform = 'matrix(1,0,0,1,' + this.x + ', ' + this.y + ')';
     },
 
     destroy: function() {
@@ -8403,7 +8679,7 @@ Ext.define('Ext.util.translatable.CssTransform', {
  * Scroll position implementation
  */
 Ext.define('Ext.util.translatable.ScrollPosition', {
-    extend: 'Ext.util.translatable.Abstract',
+    extend: 'Ext.util.translatable.Dom',
 
     wrapperWidth: 0,
 
@@ -8471,8 +8747,6 @@ Ext.define('Ext.util.translatable.ScrollPosition', {
                 wrapper.scrollTop = this.wrapperHeight - y;
             }
         }
-
-        return this.callParent(arguments);
     },
 
     refresh: function() {
@@ -8773,7 +9047,7 @@ Ext.define('Ext.util.Draggable', {
         offset.x = x = initialOffset.x;
         offset.y = y = initialOffset.y;
 
-        this.getTranslatable().doTranslate(x, y);
+        this.getTranslatable().translate(x, y);
     },
 
     updateCls: function(cls) {
@@ -9310,17 +9584,17 @@ Ext.define('Ext.behavior.Draggable', {
  *  can easily modify the {@link Ext.Panel#html html content} of a Panel after creating it:
  *
  *     @example miniphone
- *     //we can configure the HTML when we instantiate the Component
+ *     // we can configure the HTML when we instantiate the Component
  *     var panel = Ext.create('Ext.Panel', {
  *         fullscreen: true,
  *         html: 'This is a Panel'
  *     });
  *
- *     //we can update the HTML later using the setHtml method:
+ *     // we can update the HTML later using the setHtml method:
  *     panel.setHtml('Some new HTML');
  *
- *     //we can retrieve the current HTML using the getHtml method:
- *     alert(panel.getHtml()); //alerts "Some new HTML"
+ *     // we can retrieve the current HTML using the getHtml method:
+ *     Ext.Msg.alert(panel.getHtml()); // displays "Some new HTML"
  *
  * Every config has a getter method and a setter method - these are automatically generated and always follow the same
  * pattern. For example, a config called 'html' will receive getHtml and setHtml methods, a config called defaultType
@@ -9456,8 +9730,44 @@ Ext.define('Ext.Component', {
         padding: null,
 
         /**
-         * @cfg {Number/String} border The border to use on this Component. Can be specified as a number (in which
-         * case all edges get the same border width) or a CSS string like '5 10 10 10'
+         * @cfg {Number/String} border The border width to use on this Component. Can be specified as a number (in which
+         * case all edges get the same border width) or a CSS string like '5 10 10 10'.
+         * 
+         * Please note that this will not add
+         * a `border-color` or `border-style` CSS property to the component; you must do that manually using either CSS or 
+         * the {@link #style} configuration.
+         * 
+         * ## Using {@link #style}:
+         * 
+         *     Ext.Viewport.add({
+         *         centered: true,
+         *         width: 100,
+         *         height: 100,
+         *         
+         *         border: 3,
+         *         style: 'border-color: blue; border-style: solid;',
+         *         ...
+         *     });
+         * 
+         * ## Using CSS:
+         * 
+         *     Ext.Viewport.add({
+         *         centered: true,
+         *         width: 100,
+         *         height: 100,
+         *         
+         *         border: 3,
+         *         cls: 'my-component',
+         *         ...
+         *     });
+         *     
+         * And your CSS file:
+         * 
+         *     .my-component {
+         *         border-color: red;
+         *         border-style: solid;
+         *     }
+         * 
          * @accessor
          */
         border: null,
@@ -9722,19 +10032,6 @@ Ext.define('Ext.Component', {
          * @accessor
          */
         hideAnimation: null,
-
-        /**
-         * @cfg {Mixed} renderTpl
-         * <p>An {@link Ext.XTemplate XTemplate} used to create the internal structure inside this Component's
-         * encapsulating Element.</p>
-         * <p>You do not normally need to specify this. For the base classes {@link Ext.Component}
-         * and {@link Ext.Container}, this defaults to <b><code>null</code></b> which means that they will be initially rendered
-         * with no internal structure; they render their {@link #getEl Element} empty. The more specialized ExtJS and Touch classes
-         * which use a more complex DOM structure, provide their own template definitions.</p>
-         * <p>This is intended to allow the developer to create application-specific utility Components with customized
-         * internal structure.</p>
-         * @accessor
-         */
 
         /**
          * @cfg {String} tplWriteMode The Ext.(X)Template method to use when
@@ -10859,6 +11156,8 @@ Ext.define('Ext.Component', {
     applyData: function(data) {
         if (Ext.isObject(data)) {
             return Ext.apply({}, data);
+        } else if (!data) {
+            data = {};
         }
 
         return data;
@@ -12915,80 +13214,6 @@ Ext.define('Ext.fx.animation.FadeOut', {
 /**
  * @private
  */
-Ext.define('Ext.fx.animation.Pop', {
-    extend: 'Ext.fx.animation.Abstract',
-
-    alias: ['animation.pop', 'animation.popIn'],
-
-    alternateClassName: 'Ext.fx.animation.PopIn',
-
-    config: {
-        /**
-         * @cfg {Boolean} out True if you want to make this animation pop out, instead of pop in.
-         * @accessor
-         */
-        out: false,
-
-        before: {
-            display: null,
-            opacity: 0
-        },
-        after: {
-            opacity: null
-        }
-    },
-
-    getData: function() {
-        var to = this.getTo(),
-            from = this.getFrom(),
-            out = this.getOut();
-
-        if (out) {
-            from.set('opacity', 1);
-            from.setTransform({
-                scale: 1
-            });
-
-            to.set('opacity', 0);
-            to.setTransform({
-                scale: 0
-            });
-        }
-        else {
-            from.set('opacity', 0);
-            from.setTransform({
-                scale: 0
-            });
-
-            to.set('opacity', 1);
-            to.setTransform({
-                scale: 1
-            });
-        }
-
-        return this.callParent(arguments);
-    }
-});
-
-/**
- * @private
- */
-Ext.define('Ext.fx.animation.PopOut', {
-    extend: 'Ext.fx.animation.Pop',
-
-    alias: 'animation.popOut',
-
-    config: {
-        // @hide
-        out: true,
-
-        before: {}
-    }
-});
-
-/**
- * @private
- */
 Ext.define('Ext.fx.animation.Flip', {
     extend: 'Ext.fx.animation.Abstract',
 
@@ -13081,6 +13306,80 @@ Ext.define('Ext.fx.animation.Flip', {
         });
 
         return this.callParent(arguments);
+    }
+});
+
+/**
+ * @private
+ */
+Ext.define('Ext.fx.animation.Pop', {
+    extend: 'Ext.fx.animation.Abstract',
+
+    alias: ['animation.pop', 'animation.popIn'],
+
+    alternateClassName: 'Ext.fx.animation.PopIn',
+
+    config: {
+        /**
+         * @cfg {Boolean} out True if you want to make this animation pop out, instead of pop in.
+         * @accessor
+         */
+        out: false,
+
+        before: {
+            display: null,
+            opacity: 0
+        },
+        after: {
+            opacity: null
+        }
+    },
+
+    getData: function() {
+        var to = this.getTo(),
+            from = this.getFrom(),
+            out = this.getOut();
+
+        if (out) {
+            from.set('opacity', 1);
+            from.setTransform({
+                scale: 1
+            });
+
+            to.set('opacity', 0);
+            to.setTransform({
+                scale: 0
+            });
+        }
+        else {
+            from.set('opacity', 0);
+            from.setTransform({
+                scale: 0
+            });
+
+            to.set('opacity', 1);
+            to.setTransform({
+                scale: 1
+            });
+        }
+
+        return this.callParent(arguments);
+    }
+});
+
+/**
+ * @private
+ */
+Ext.define('Ext.fx.animation.PopOut', {
+    extend: 'Ext.fx.animation.Pop',
+
+    alias: 'animation.popOut',
+
+    config: {
+        // @hide
+        out: true,
+
+        before: {}
     }
 });
 
@@ -13823,7 +14122,7 @@ Ext.define('Ext.fx.runner.CssTransition', {
                 for (i = 0,ln = sessions.length; i < ln; i++) {
                     session = sessions[i];
                     if (session.animation === animation) {
-                        this.refreshRunningAnimationsData(session.element, session.list.slice(), true);
+                        this.refreshRunningAnimationsData(session.element, session.list.slice(), false);
                     }
                 }
             }
@@ -14374,226 +14673,6 @@ Ext.define('Ext.layout.Default', {
 })(Ext.baseCSSPrefix);
 
 /**
- * @aside guide layouts
- * @aside video layouts
- *
- * AbstractBox is a superclass for the two box layouts:
- *
- * * {@link Ext.layout.HBox hbox}
- * * {@link Ext.layout.VBox vbox}
- *
- * AbstractBox itself is never used directly, but its subclasses provide flexible arrangement of child components
- * inside a {@link Ext.Container Container}. For a full overview of layouts check out the
- * [Layout Guide](#!/guide/layouts).
- *
- * ## Horizontal Box
- *
- * HBox allows you to easily lay out child components horizontally. It can size items based on a fixed width or a
- * fraction of the total width available, enabling you to achieve flexible layouts that expand or contract to fill the
- * space available.
- *
- * {@img ../guides/layouts/hbox.jpg}
- *
- * See the {@link Ext.layout.HBox HBox layout docs} for more information on using hboxes.
- *
- * ## Vertical Box
- *
- * VBox allows you to easily lay out child components verticaly. It can size items based on a fixed height or a
- * fraction of the total height available, enabling you to achieve flexible layouts that expand or contract to fill the
- * space available.
- *
- * {@img ../guides/layouts/vbox.jpg}
- *
- * See the {@link Ext.layout.VBox VBox layout docs} for more information on using vboxes.
- */
-Ext.define('Ext.layout.AbstractBox', {
-    extend: 'Ext.layout.Default',
-
-    config: {
-        /**
-         * @cfg {String} align
-         * Controls how the child items of the container are aligned. Acceptable configuration values for this property are:
-         *
-         * - ** start ** : child items are packed together at left side of container
-         * - ** center ** : child items are packed together at mid-width of container
-         * - ** end ** : child items are packed together at right side of container
-         * - **stretch** : child items are stretched vertically to fill the height of the container
-         *
-         * Please see the 'Pack and Align' section of the [Layout guide](#!/guide/layouts) for a detailed example and
-         * explanation.
-         * @accessor
-         */
-        align: 'stretch',
-
-        /**
-         * @cfg {String} pack
-         * Controls how the child items of the container are packed together. Acceptable configuration values
-         * for this property are:
-         *
-         * - ** start ** : child items are packed together at left side of container
-         * - ** center ** : child items are packed together at mid-width of container
-         * - ** end ** : child items are packed together at right side of container
-         *
-         * Please see the 'Pack and Align' section of the [Layout guide](#!/guide/layouts) for a detailed example and
-         * explanation.
-         * @accessor
-         */
-        pack: null
-    },
-
-    flexItemCls: Ext.baseCSSPrefix + 'layout-box-item',
-
-    positionMap: {
-        middle: 'center',
-        left: 'start',
-        top: 'start',
-        right: 'end',
-        bottom: 'end'
-    },
-
-    constructor: function(container) {
-        this.callParent(arguments);
-
-        container.innerElement.addCls(this.cls);
-
-        container.on(this.sizeChangeEventName, 'onItemSizeChange', this, {
-            delegate: '> component'
-        });
-    },
-
-    reapply: function() {
-        this.container.innerElement.addCls(this.cls);
-
-        this.updatePack(this.getPack());
-        this.updateAlign(this.getAlign());
-    },
-
-    unapply: function() {
-        this.container.innerElement.removeCls(this.cls);
-
-        this.updatePack(null);
-        this.updateAlign(null);
-    },
-
-    /**
-     * @private
-     */
-    doItemAdd: function(item, index) {
-        this.callParent(arguments);
-
-        if (item.isInnerItem()) {
-            var size = item.getConfig(this.sizePropertyName),
-                config = item.config;
-
-            if (!size && ('flex' in config)) {
-                this.setItemFlex(item, config.flex);
-            }
-        }
-    },
-
-    /**
-     * @private
-     */
-    doItemRemove: function(item) {
-        if (item.isInnerItem()) {
-            this.setItemFlex(item, null);
-        }
-
-        this.callParent(arguments);
-    },
-
-    onItemSizeChange: function(item) {
-        this.setItemFlex(item, null);
-    },
-
-    /**
-     * @private
-     */
-    doItemCenteredChange: function(item, centered) {
-        if (centered) {
-            this.setItemFlex(item, null);
-        }
-
-        this.callParent(arguments);
-    },
-
-    /**
-     * @private
-     */
-    doItemFloatingChange: function(item, floating) {
-        if (floating) {
-            this.setItemFlex(item, null);
-        }
-
-        this.callParent(arguments);
-    },
-
-    /**
-     * @private
-     */
-    doItemDockedChange: function(item, docked) {
-        if (docked) {
-            this.setItemFlex(item, null);
-        }
-
-        this.callParent(arguments);
-    },
-
-    redrawContainer: function() {
-        var container = this.container,
-            renderedTo = container.renderElement.dom.parentNode;
-
-        if (renderedTo && renderedTo.nodeType !== 11) {
-            container.innerElement.redraw();
-        }
-    },
-
-    /**
-     * Sets the flex of an item in this box layout.
-     * @param {Ext.Component} item The item of this layout which you want to update the flex of.
-     * @param {Number} flex The flex to set on this method
-     */
-    setItemFlex: function(item, flex) {
-        var element = item.element,
-            flexItemCls = this.flexItemCls;
-
-        if (flex) {
-            element.addCls(flexItemCls);
-        }
-        else if (element.hasCls(flexItemCls)) {
-            this.redrawContainer();
-            element.removeCls(flexItemCls);
-        }
-
-        element.dom.style.webkitBoxFlex = flex;
-    },
-
-    convertPosition: function(position) {
-        if (this.positionMap.hasOwnProperty(position)) {
-            return this.positionMap[position];
-        }
-
-        return position;
-    },
-
-    applyAlign: function(align) {
-        return this.convertPosition(align);
-    },
-
-    updateAlign: function(align) {
-        this.container.innerElement.dom.style.webkitBoxAlign = align;
-    },
-
-    applyPack: function(pack) {
-         return this.convertPosition(pack);
-    },
-
-    updatePack: function(pack) {
-        this.container.innerElement.dom.style.webkitBoxPack = pack;
-    }
-});
-
-/**
  * Represents a single sorter that can be used as part of the sorters configuration in Ext.mixin.Sortable.
  *
  * A common place for Sorters to be used are {@link Ext.data.Store Stores}. For example:
@@ -15064,6 +15143,8 @@ Ext.define('Ext.scroll.indicator.Abstract', {
 
         length: null,
 
+        minLength: 6,
+
         hidden: true,
 
         ui: 'dark'
@@ -15141,6 +15222,10 @@ Ext.define('Ext.scroll.indicator.Abstract', {
         else {
             elementDomStyle.opacity = '';
         }
+    },
+
+    applyLength: function(length) {
+        return Math.max(this.getMinLength(), length);
     },
 
     updateLength: function(length) {
@@ -15288,16 +15373,7 @@ Ext.define('Ext.LoadMask', {
          * True to show the loading indicator on this {@link Ext.LoadMask}.
          * @accessor
          */
-        indicator: true,
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        listeners: {
-            painted: 'onPainted',
-            erased: 'onErased'
-        }
+        indicator: true
     },
 
     getTemplate: function() {
@@ -15360,18 +15436,22 @@ Ext.define('Ext.LoadMask', {
 
     onPainted: function() {
         this.getParent().on({
-            scope: this,
-            resize: this.refreshPosition
+            scope  : this,
+            resize : this.refreshPosition
         });
 
         this.refreshPosition();
+
+        this.callParent(arguments);
     },
 
     onErased: function() {
         this.getParent().un({
-            scope: this,
-            resize: this.refreshPosition
+            scope  : this,
+            resize : this.refreshPosition
         });
+
+        this.callParent(arguments);
     },
 
     /**
@@ -15467,6 +15547,226 @@ Ext.define('Ext.layout.Fit', {
         }
 
         this.callParent(arguments);
+    }
+});
+
+/**
+ * @aside guide layouts
+ * @aside video layouts
+ *
+ * AbstractBox is a superclass for the two box layouts:
+ *
+ * * {@link Ext.layout.HBox hbox}
+ * * {@link Ext.layout.VBox vbox}
+ *
+ * AbstractBox itself is never used directly, but its subclasses provide flexible arrangement of child components
+ * inside a {@link Ext.Container Container}. For a full overview of layouts check out the
+ * [Layout Guide](#!/guide/layouts).
+ *
+ * ## Horizontal Box
+ *
+ * HBox allows you to easily lay out child components horizontally. It can size items based on a fixed width or a
+ * fraction of the total width available, enabling you to achieve flexible layouts that expand or contract to fill the
+ * space available.
+ *
+ * {@img ../guides/layouts/hbox.jpg}
+ *
+ * See the {@link Ext.layout.HBox HBox layout docs} for more information on using hboxes.
+ *
+ * ## Vertical Box
+ *
+ * VBox allows you to easily lay out child components verticaly. It can size items based on a fixed height or a
+ * fraction of the total height available, enabling you to achieve flexible layouts that expand or contract to fill the
+ * space available.
+ *
+ * {@img ../guides/layouts/vbox.jpg}
+ *
+ * See the {@link Ext.layout.VBox VBox layout docs} for more information on using vboxes.
+ */
+Ext.define('Ext.layout.AbstractBox', {
+    extend: 'Ext.layout.Default',
+
+    config: {
+        /**
+         * @cfg {String} align
+         * Controls how the child items of the container are aligned. Acceptable configuration values for this property are:
+         *
+         * - ** start ** : child items are packed together at left side of container
+         * - ** center ** : child items are packed together at mid-width of container
+         * - ** end ** : child items are packed together at right side of container
+         * - **stretch** : child items are stretched vertically to fill the height of the container
+         *
+         * Please see the 'Pack and Align' section of the [Layout guide](#!/guide/layouts) for a detailed example and
+         * explanation.
+         * @accessor
+         */
+        align: 'stretch',
+
+        /**
+         * @cfg {String} pack
+         * Controls how the child items of the container are packed together. Acceptable configuration values
+         * for this property are:
+         *
+         * - ** start ** : child items are packed together at left side of container
+         * - ** center ** : child items are packed together at mid-width of container
+         * - ** end ** : child items are packed together at right side of container
+         *
+         * Please see the 'Pack and Align' section of the [Layout guide](#!/guide/layouts) for a detailed example and
+         * explanation.
+         * @accessor
+         */
+        pack: null
+    },
+
+    flexItemCls: Ext.baseCSSPrefix + 'layout-box-item',
+
+    positionMap: {
+        middle: 'center',
+        left: 'start',
+        top: 'start',
+        right: 'end',
+        bottom: 'end'
+    },
+
+    constructor: function(container) {
+        this.callParent(arguments);
+
+        container.innerElement.addCls(this.cls);
+
+        container.on(this.sizeChangeEventName, 'onItemSizeChange', this, {
+            delegate: '> component'
+        });
+    },
+
+    reapply: function() {
+        this.container.innerElement.addCls(this.cls);
+
+        this.updatePack(this.getPack());
+        this.updateAlign(this.getAlign());
+    },
+
+    unapply: function() {
+        this.container.innerElement.removeCls(this.cls);
+
+        this.updatePack(null);
+        this.updateAlign(null);
+    },
+
+    /**
+     * @private
+     */
+    doItemAdd: function(item, index) {
+        this.callParent(arguments);
+
+        if (item.isInnerItem()) {
+            var size = item.getConfig(this.sizePropertyName),
+                config = item.config;
+
+            if (!size && ('flex' in config)) {
+                this.setItemFlex(item, config.flex);
+            }
+        }
+    },
+
+    /**
+     * @private
+     */
+    doItemRemove: function(item) {
+        if (item.isInnerItem()) {
+            this.setItemFlex(item, null);
+        }
+
+        this.callParent(arguments);
+    },
+
+    onItemSizeChange: function(item) {
+        this.setItemFlex(item, null);
+    },
+
+    /**
+     * @private
+     */
+    doItemCenteredChange: function(item, centered) {
+        if (centered) {
+            this.setItemFlex(item, null);
+        }
+
+        this.callParent(arguments);
+    },
+
+    /**
+     * @private
+     */
+    doItemFloatingChange: function(item, floating) {
+        if (floating) {
+            this.setItemFlex(item, null);
+        }
+
+        this.callParent(arguments);
+    },
+
+    /**
+     * @private
+     */
+    doItemDockedChange: function(item, docked) {
+        if (docked) {
+            this.setItemFlex(item, null);
+        }
+
+        this.callParent(arguments);
+    },
+
+    redrawContainer: function() {
+        var container = this.container,
+            renderedTo = container.renderElement.dom.parentNode;
+
+        if (renderedTo && renderedTo.nodeType !== 11) {
+            container.innerElement.redraw();
+        }
+    },
+
+    /**
+     * Sets the flex of an item in this box layout.
+     * @param {Ext.Component} item The item of this layout which you want to update the flex of.
+     * @param {Number} flex The flex to set on this method
+     */
+    setItemFlex: function(item, flex) {
+        var element = item.element,
+            flexItemCls = this.flexItemCls;
+
+        if (flex) {
+            element.addCls(flexItemCls);
+        }
+        else if (element.hasCls(flexItemCls)) {
+            this.redrawContainer();
+            element.removeCls(flexItemCls);
+        }
+
+        element.dom.style.webkitBoxFlex = flex;
+    },
+
+    convertPosition: function(position) {
+        if (this.positionMap.hasOwnProperty(position)) {
+            return this.positionMap[position];
+        }
+
+        return position;
+    },
+
+    applyAlign: function(align) {
+        return this.convertPosition(align);
+    },
+
+    updateAlign: function(align) {
+        this.container.innerElement.dom.style.webkitBoxAlign = align;
+    },
+
+    applyPack: function(pack) {
+         return this.convertPosition(pack);
+    },
+
+    updatePack: function(pack) {
+        this.container.innerElement.dom.style.webkitBoxPack = pack;
     }
 });
 
@@ -17002,10 +17302,6 @@ Ext.define('Ext.scroll.indicator.Default', {
         }
     },
 
-    applyLength: function(length) {
-        return Math.round(Math.max(0, length));
-    },
-
     updateValue: function(value) {
         var barLength = this.barLength,
             gapLength = this.gapLength,
@@ -17064,15 +17360,14 @@ Ext.define('Ext.scroll.indicator.ScrollPosition', {
         }
     },
 
-    setLength: function(length) {
-        var axis = this.getAxis(),
-            scrollOffset = this.barLength,
+    updateLength: function() {
+        var scrollOffset = this.barLength,
             barDom = this.barElement.dom,
             element = this.element;
 
         this.callParent(arguments);
 
-        if (axis === 'x') {
+        if (this.getAxis() === 'x') {
             barDom.scrollLeft = scrollOffset;
             element.setLeft(scrollOffset);
         }
@@ -17083,13 +17378,14 @@ Ext.define('Ext.scroll.indicator.ScrollPosition', {
     },
 
     setOffset: function(offset) {
-        var axis = this.getAxis(),
-            scrollOffset = this.barLength,
+        var barLength = this.barLength,
+            minLength = this.getMinLength(),
             barDom = this.barElement.dom;
 
-        offset = scrollOffset - offset;
+        offset = Math.min(barLength - minLength, Math.max(offset, minLength - this.getLength()));
+        offset = barLength - offset;
 
-        if (axis === 'x') {
+        if (this.getAxis() === 'x') {
             barDom.scrollLeft = offset;
         }
         else {
@@ -17146,13 +17442,8 @@ Ext.define('Ext.scroll.indicator.CssTransform', {
 
         this.startElementLength = startElementLength;
         this.endElementLength = endElementLength;
-        this.minLength = startElementLength + endElementLength;
 
         this.callParent();
-    },
-
-    applyLength: function(length) {
-        return Math.round(Math.max(this.minLength, length));
     },
 
     updateLength: function(length) {
@@ -17225,7 +17516,7 @@ Ext.define('Ext.scroll.Indicator', {
     alternateClassName: 'Ext.util.Indicator',
 
     constructor: function(config) {
-        if (Ext.os.is.Android2 || Ext.browser.is.ChromeMobile) {
+        if (Ext.os.is.Android2 || Ext.os.is.Android3 || Ext.browser.is.ChromeMobile) {
             return new Ext.scroll.indicator.ScrollPosition(config);
         }
         else if (Ext.os.is.iOS) {
@@ -17482,12 +17773,6 @@ Ext.define('Ext.scroll.Scroller', {
          * @cfg
          * @private
          */
-        translationMethod: 'auto',
-
-        /**
-         * @cfg
-         * @private
-         */
         fps: 'auto',
 
         /**
@@ -17581,12 +17866,6 @@ Ext.define('Ext.scroll.Scroller', {
          * @cfg
          * @private
          */
-        containerScrollSize: 'auto',
-
-        /**
-         * @cfg
-         * @private
-         */
         size: 'auto',
 
         /**
@@ -17639,6 +17918,11 @@ Ext.define('Ext.scroll.Scroller', {
 
         slotSnapEasing: {
             duration: 150
+        },
+
+        translatable: {
+            translationMethod: 'auto',
+            useWrapper: false
         }
     },
 
@@ -17660,9 +17944,6 @@ Ext.define('Ext.scroll.Scroller', {
     constructor: function(config) {
         var element = config && config.element;
 
-        this.doAnimationFrame = Ext.Function.bind(this.doAnimationFrame, this);
-        this.stopAnimation = Ext.Function.bind(this.stopAnimation, this);
-
         this.listeners = {
             scope: this,
             touchstart: 'onTouchStart',
@@ -17675,8 +17956,6 @@ Ext.define('Ext.scroll.Scroller', {
         this.minPosition = { x: 0, y: 0 };
 
         this.startPosition = { x: 0, y: 0 };
-
-        this.size = { x: 0, y: 0 };
 
         this.position = { x: 0, y: 0 };
 
@@ -17732,26 +18011,19 @@ Ext.define('Ext.scroll.Scroller', {
         return this;
     },
 
-    getTranslatable: function() {
-        if (!this.hasOwnProperty('translatable')) {
-            var bounceEasing = this.getBounceEasing();
+    applyTranslatable: function(config, translatable) {
+        return Ext.factory(config, Ext.util.Translatable, translatable);
+    },
 
-            this.translatable = new Ext.util.Translatable({
-                translationMethod: this.getTranslationMethod(),
-                element: this.getElement(),
-                easingX: bounceEasing.x,
-                easingY: bounceEasing.y,
-                useWrapper: false,
-                listeners: {
-                    animationframe: 'onAnimationFrame',
-                    animationend: 'onAnimationEnd',
-                    axisanimationend: 'onAxisAnimationEnd',
-                    scope: this
-                }
-            });
-        }
-
-        return this.translatable;
+    updateTranslatable: function(translatable) {
+        translatable.setConfig({
+            element: this.getElement(),
+            listeners: {
+                animationframe: 'onAnimationFrame',
+                animationend: 'onAnimationEnd',
+                scope: this
+            }
+        });
     },
 
     updateFps: function(fps) {
@@ -17800,7 +18072,7 @@ Ext.define('Ext.scroll.Scroller', {
         position.x = x = initialOffset.x;
         position.y = y = initialOffset.y;
 
-        this.getTranslatable().doTranslate(-x, -y);
+        this.getTranslatable().translate(-x, -y);
     },
 
     /**
@@ -17874,6 +18146,10 @@ Ext.define('Ext.scroll.Scroller', {
             x: Ext.factory(easing, defaultClass),
             y: Ext.factory(easing, defaultClass)
         };
+    },
+
+    updateBounceEasing: function(easing) {
+        this.getTranslatable().setEasingX(easing.x).setEasingY(easing.y);
     },
 
     /**
@@ -17981,33 +18257,9 @@ Ext.define('Ext.scroll.Scroller', {
             x = dom.offsetWidth;
             y = dom.offsetHeight;
         }
-        else {
-            x = size.x;
-            y = size.y;
-        }
-
-        return {
-            x: x,
-            y: y
-        };
-    },
-
-    /**
-     * @private
-     */
-    applyContainerScrollSize: function(size) {
-        var containerDom = this.getContainer().dom,
-            x, y;
-
-        if (!containerDom) {
-            return;
-        }
-
-        this.givenContainerScrollSize = size;
-
-        if (size === 'auto') {
-            x = containerDom.scrollWidth;
-            y = containerDom.scrollHeight;
+        else if (typeof size == 'number') {
+            x = size;
+            y = size;
         }
         else {
             x = size.x;
@@ -18097,7 +18349,6 @@ Ext.define('Ext.scroll.Scroller', {
         this.getTranslatable().refresh();
         this.setSize(this.givenSize);
         this.setContainerSize(this.givenContainerSize);
-        this.setContainerScrollSize(this.givenContainerScrollSize);
         this.setDirection(this.givenDirection);
 
         this.fireEvent('refresh', this);
@@ -18170,7 +18421,7 @@ Ext.define('Ext.scroll.Scroller', {
             }
             else {
                 this.fireEvent('scroll', this, position.x, position.y);
-                translatable.doTranslate(translationX, translationY);
+                translatable.translate(translationX, translationY);
             }
         }
 
@@ -18191,7 +18442,10 @@ Ext.define('Ext.scroll.Scroller', {
      * @return {Ext.scroll.Scroller} this
      */
     scrollToEnd: function(animation) {
-        return this.scrollTo(0, this.getSize().y - this.getContainerSize().y, animation);
+        var size    = this.getSize(),
+            cntSize = this.getContainerSize();
+
+        return this.scrollTo(size.x - cntSize.x, size.y - cntSize.y, animation);
     },
 
     /**
@@ -18455,10 +18709,6 @@ Ext.define('Ext.scroll.Scroller', {
         this.fireEvent('scroll', this, position.x, position.y);
     },
 
-    onAxisAnimationEnd: function(axis) {
-
-    },
-
     /**
      * @private
      */
@@ -18583,7 +18833,7 @@ Ext.define('Ext.scroll.Scroller', {
             this.getContainer().removeCls(this.containerCls);
         }
 
-        Ext.destroy(this.translatable);
+        Ext.destroy(this.getTranslatable());
 
         this.callParent(arguments);
     }
@@ -18900,6 +19150,13 @@ Ext.define('Ext.scroll.View', {
         var element = this.getElement(),
             indicators = this.getIndicators();
 
+        Ext.destroy(this.getScroller(), this.indicatorsGrid);
+
+        if (this.hasOwnProperty('indicatorsHidingTimer')) {
+            clearTimeout(this.indicatorsHidingTimer);
+            delete this.indicatorsHidingTimer;
+        }
+
         if (element && !element.isDestroyed) {
             element.removeCls(this.getCls());
         }
@@ -18907,7 +19164,6 @@ Ext.define('Ext.scroll.View', {
         indicators.x.destroy();
         indicators.y.destroy();
 
-        Ext.destroy(this.getScroller(), this.indicatorsGrid);
         delete this.indicatorsGrid;
 
         this.callParent(arguments);
@@ -18941,7 +19197,7 @@ Ext.define('Ext.behavior.Scrollable', {
     setConfig: function(config) {
         var scrollView = this.scrollView,
             component = this.component,
-            scrollViewElement, scrollerElement;
+            scrollerElement;
 
         if (config) {
             if (!scrollView) {
@@ -18952,9 +19208,8 @@ Ext.define('Ext.behavior.Scrollable', {
 
                 this.scrollerElement = scrollerElement = component.innerElement;
                 this.scrollContainer = scrollerElement.wrap();
-                this.scrollViewElement = scrollViewElement = component.bodyElement;
 
-                scrollView.setElement(scrollViewElement);
+                scrollView.setElement(component.bodyElement);
 
                 if (component.isPainted()) {
                     this.onComponentPainted(component);
@@ -19733,13 +19988,33 @@ Ext.define('Ext.Container', {
 
     eventedConfig: {
         /**
-         * @cfg {Object/Number} activeItem The item from the {@link #cfg-items} collection that will be active first. This is
+         * @cfg {Object/String/Number} activeItem The item from the {@link #cfg-items} collection that will be active first. This is
          * usually only meaningful in a {@link Ext.layout.Card card layout}, where only one item can be active at a
-         * time
+         * time. If passes a string, it will be assumed to be a {@link Ext.ComponentQuery} selector.
          * @accessor
          * @evented
          */
-        activeItem: 0
+        activeItem: 0,
+
+        /**
+         * @cfg {Boolean/String/Object} scrollable
+         * Configuration options to make this Container scrollable. Acceptable values are:
+         *
+         * * 'horizontal', 'vertical', 'both' to enabling scrolling for that direction.
+         * * true/false to explicitly enable/disable scrolling.
+         *
+         * Alternatively, you can give it an object which is then passed to the scroller instance:
+         *
+         *     scrollable: {
+         *         direction: 'vertical',
+         *         directionLock: true
+         *     }
+         *
+         * Please look at the {@link Ext.scroll.Scroller} documentation for more example on how to use this.
+         * @accessor
+         * @evented
+         */
+        scrollable: null
     },
 
     config: {
@@ -19855,25 +20130,6 @@ Ext.define('Ext.Container', {
          * @accessor
          */
         defaultType: null,
-
-        /**
-         * @cfg {Boolean/String/Object} scrollable
-         * Configuration options to make this Container scrollable. Acceptable values are:
-         *
-         * * 'horizontal', 'vertical', 'both' to enabling scrolling for that direction.
-         * * true/false to explicitly enable/disable scrolling.
-         *
-         * Alternatively, you can give it an object which is then passed to the scroller instance:
-         *
-         *     scrollable: {
-         *         direction: 'vertical',
-         *         directionLock: true
-         *     }
-         *
-         * Please look at the {@link Ext.scroll.Scroller} documentation for more example on how to use this.
-         * @accessor
-         */
-        scrollable: null,
 
         //@private
         useBodyElement: null,
@@ -20025,19 +20281,31 @@ Ext.define('Ext.Container', {
         this.setModal(null);
     },
 
-    refreshModalMask: function() {
-        var mask = this.getModal(),
-            container = this.getParent();
+    updateHideOnMaskTap : function(hide) {
+        var mask = this.getModal();
 
-        if (!this.painted) {
-            this.painted = true;
+        if (mask) {
+            mask.un('tap', 'hide', this);
+        }
+
+        if (hide && mask) {
+            mask.on('tap', 'hide', this);
+        }
+    },
+
+    refreshModalMask: function() {
+        var me        = this,
+            mask      = me.getModal(),
+            container = me.getParent();
+
+        if (!me.painted) {
+            me.painted = true;
 
             if (mask) {
-                container.insertBefore(mask, this);
-                mask.setZIndex(this.getZIndex() - 1);
-                if (this.getHideOnMaskTap()) {
-                    mask.on('tap', 'hide', this, { single: true });
-                }
+                container.insertBefore(mask, me);
+                mask.setZIndex(me.getZIndex() - 1);
+
+                me.updateHideOnMaskTap(me.getHideOnMaskTap());
             }
         }
     },
@@ -20100,14 +20368,23 @@ Ext.define('Ext.Container', {
 
     applyItems: function(items, collection) {
         if (items) {
-            this.getDefaultType();
-            this.getDefaults();
+            var me = this;
 
-            if (this.initialized && collection.length > 0) {
-                this.removeAll();
+            me.getDefaultType();
+            me.getDefaults();
+
+            if (me.initialized && collection.length > 0) {
+                me.removeAll();
             }
 
-            this.add(items);
+            me.add(items);
+
+            //Don't need to call setActiveItem when Container is first initialized
+            if (me.initialized) {
+                var activeItem = me.initialConfig.activeItem || me.config.activeItem || 0;
+
+                me.setActiveItem(activeItem);
+            }
         }
     },
 
@@ -20369,6 +20646,7 @@ Ext.define('Ext.Container', {
                 ln--;
             }
         }
+        this.setActiveItem(null);
 
         this.removingAll = false;
 
@@ -20765,16 +21043,27 @@ Ext.define('Ext.Container', {
             }
         }
         else if (activeItem) {
-            if (!activeItem.isComponent) {
-                activeItem = this.factoryItem(activeItem);
+            var item;
+
+            //ComponentQuery selector?
+            if (typeof activeItem == 'string') {
+                item = this.child(activeItem);
+
+                activeItem = {
+                    xtype : activeItem
+                };
+            }
+
+            if (!item || !item.isComponent) {
+                item = this.factoryItem(activeItem);
             }
 
 
-            if (!this.has(activeItem)) {
-                this.add(activeItem);
+            if (!this.has(item)) {
+                this.add(item);
             }
 
-            return activeItem;
+            return item;
         }
     },
 
@@ -20856,6 +21145,11 @@ Ext.define('Ext.Container', {
      */
     applyScrollable: function(config) {
         this.getScrollableBehavior().setConfig(config);
+        return config;
+    },
+
+    doSetScrollable: function() {
+        // Used for plugins when they need to reinitialize scroller listeners
     },
 
     /**
@@ -21041,6 +21335,7 @@ Ext.define('Ext.viewport.Default', {
          * - Orientation change performance is drastically reduced when this is enabled, on all devices.
          * - On some devices (mostly Android) this can sometimes cause issues when the default browser zoom setting is changed.
          * - When wrapping your phone in a native shell, you may get a blank screen.
+         * - When bookmarked to the homescreen (iOS), you may get a blank screen.
          *
          * @accessor
          */
@@ -21156,11 +21451,14 @@ Ext.define('Ext.viewport.Default', {
 
         this.callParent([config]);
 
-        if (this.supportsOrientation()) {
-            this.addWindowListener('orientationchange', bind(this.onOrientationChange, this));
-        }
-        else {
-            this.addWindowListener('resize', bind(this.onResize, this));
+        // Android is handled separately
+        if (!Ext.os.is.Android) {
+            if (this.supportsOrientation()) {
+                this.addWindowListener('orientationchange', bind(this.onOrientationChange, this));
+            }
+            else {
+                this.addWindowListener('resize', bind(this.onResize, this));
+            }
         }
 
         document.addEventListener('focus', bind(this.onElementFocus, this), true);
@@ -21321,8 +21619,8 @@ Ext.define('Ext.viewport.Default', {
 
             this.updateSize();
 
-            firingArguments[1] = this.windowWidth;
-            firingArguments[2] = this.windowHeight;
+            firingArguments[2] = this.windowWidth;
+            firingArguments[3] = this.windowHeight;
 
             controller.resume();
         }, this, { single: true });
@@ -21386,7 +21684,9 @@ Ext.define('Ext.viewport.Default', {
             currentOrientation = this.getOrientation(),
             newOrientation = this.determineOrientation();
 
-        if ((oldWidth !== width || oldHeight !== height) && currentOrientation !== newOrientation) {
+        // Determine orientation change via resize. BOTH width AND height much change, otherwise
+        // this is a keyboard popping up.
+        if ((oldWidth !== width && oldHeight !== height) && currentOrientation !== newOrientation) {
             this.fireOrientationChangeEvent(newOrientation, currentOrientation);
         }
     },
@@ -21692,7 +21992,9 @@ Ext.define('Ext.viewport.Android', {
         this.on('orientationchange', 'doFireOrientationChangeEvent', this, { prepend: true });
         this.on('orientationchange', 'hideKeyboardIfNeeded', this, { prepend: true });
 
-        return this.callParent(arguments);
+        this.callParent(arguments);
+
+        this.addWindowListener('resize', Ext.Function.bind(this.onResize, this));
     },
 
     getDummyInput: function() {
@@ -21765,8 +22067,8 @@ Ext.define('Ext.viewport.Android', {
             this.windowOuterHeight = this.getWindowOuterHeight();
             this.updateSize();
 
-            eventController.firingArguments[1] = this.windowWidth;
-            eventController.firingArguments[2] = this.windowHeight;
+            eventController.firingArguments[2] = this.windowWidth;
+            eventController.firingArguments[3] = this.windowHeight;
             eventController.resume();
             this.orientationChanging = false;
 
@@ -21796,6 +22098,10 @@ Ext.define('Ext.viewport.Android', {
 
     doFixSize: function() {
         this.setHeight(this.getWindowHeight());
+    },
+
+    determineOrientation: function() {
+        return (this.getWindowHeight() >= this.getWindowWidth()) ? this.PORTRAIT : this.LANDSCAPE;
     },
 
     getActualWindowOuterHeight: function() {
@@ -22035,112 +22341,6 @@ Ext.define('Ext.viewport.Viewport', {
  * **Note** if you use {@link Ext#onReady}, this instance of {@link Ext.Viewport} will **not** be created. Though, in most cases,
  * you should **not** use {@link Ext#onReady}.
  */
-
-/**
- * @author Ed Spencer
- * @private
- *
- * Manages the stack of {@link Ext.app.Action} instances that have been decoded, pushes new urls into the browser's
- * location object and listens for changes in url, firing the {@link #change} event when a change is detected.
- *
- * This is tied to an {@link Ext.app.Application Application} instance. The Application performs all of the
- * interactions with the History object, no additional integration should be required.
- */
-Ext.define('Ext.app.History', {
-    mixins: ['Ext.mixin.Observable'],
-
-    /**
-     * @event change
-     * Fires when a change in browser url is detected
-     * @param {String} url The new url, after the hash (e.g. http://myapp.com/#someUrl returns 'someUrl')
-     */
-
-    config: {
-        /**
-         * @cfg {Array} actions The stack of {@link Ext.app.Action action} instances that have occured so far
-         */
-        actions: [],
-
-        /**
-         * @cfg {Boolean} updateUrl True to automatically update the browser's url when {@link #add} is called
-         */
-        updateUrl: true,
-
-        /**
-         * @cfg {String} token The current token as read from the browser's location object
-         */
-        token: ''
-    },
-
-    constructor: function(config) {
-        if (Ext.feature.has.History) {
-            window.addEventListener('hashchange', Ext.bind(this.detectStateChange, this));
-        }
-        else {
-            setInterval(Ext.bind(this.detectStateChange, this), 50);
-        }
-
-        this.initConfig(config);
-    },
-
-    /**
-     * Adds an {@link Ext.app.Action Action} to the stack, optionally updating the browser's url and firing the
-     * {@link #change} event.
-     * @param {Ext.app.Action} action The Action to add to the stack
-     * @param {Boolean} silent Cancels the firing of the {@link #change} event if true
-     */
-    add: function(action, silent) {
-        this.getActions().push(Ext.factory(action, Ext.app.Action));
-
-        var url = action.getUrl();
-
-        if (this.getUpdateUrl()) {
-            // history.pushState({}, action.getTitle(), "#" + action.getUrl());
-            this.setToken(url);
-            window.location.hash = url;
-        }
-
-        if (silent !== true) {
-            this.fireEvent('change', url);
-        }
-
-        this.setToken(url);
-    },
-
-    /**
-     * @private
-     */
-    back: function() {
-        this.getActions().pop().run();
-    },
-
-    /**
-     * @private
-     */
-    applyToken: function(token) {
-        return token[0] == '#' ? token.substr(1) : token;
-    },
-
-    /**
-     * @private
-     */
-    detectStateChange: function() {
-        var newToken = this.applyToken(window.location.hash),
-            oldToken = this.getToken();
-
-        if (newToken != oldToken) {
-            this.onStateChange();
-            this.setToken(newToken);
-        }
-    },
-
-    /**
-     * @private
-     */
-    onStateChange: function() {
-        this.fireEvent('change', window.location.hash.substr(1));
-    }
-});
 
 /**
  * @author Ed Spencer
@@ -22392,6 +22592,119 @@ Ext.define('Ext.app.Profile', {
         return map;
     }
 });
+/**
+ * @author Ed Spencer
+ * @private
+ *
+ * Manages the stack of {@link Ext.app.Action} instances that have been decoded, pushes new urls into the browser's
+ * location object and listens for changes in url, firing the {@link #change} event when a change is detected.
+ *
+ * This is tied to an {@link Ext.app.Application Application} instance. The Application performs all of the
+ * interactions with the History object, no additional integration should be required.
+ */
+Ext.define('Ext.app.History', {
+    mixins: ['Ext.mixin.Observable'],
+
+    /**
+     * @event change
+     * Fires when a change in browser url is detected
+     * @param {String} url The new url, after the hash (e.g. http://myapp.com/#someUrl returns 'someUrl')
+     */
+
+    config: {
+        /**
+         * @cfg {Array} actions The stack of {@link Ext.app.Action action} instances that have occured so far
+         */
+        actions: [],
+
+        /**
+         * @cfg {Boolean} updateUrl True to automatically update the browser's url when {@link #add} is called
+         */
+        updateUrl: true,
+
+        /**
+         * @cfg {String} token The current token as read from the browser's location object
+         */
+        token: ''
+    },
+
+    constructor: function(config) {
+        if (Ext.feature.has.History) {
+            window.addEventListener('hashchange', Ext.bind(this.detectStateChange, this));
+        }
+        else {
+            this.setToken(window.location.hash.substr(1));
+            setInterval(Ext.bind(this.detectStateChange, this), 100);
+        }
+
+        this.initConfig(config);
+    },
+
+    /**
+     * Adds an {@link Ext.app.Action Action} to the stack, optionally updating the browser's url and firing the
+     * {@link #change} event.
+     * @param {Ext.app.Action} action The Action to add to the stack
+     * @param {Boolean} silent Cancels the firing of the {@link #change} event if true
+     */
+    add: function(action, silent) {
+        this.getActions().push(Ext.factory(action, Ext.app.Action));
+
+        var url = action.getUrl();
+
+        if (this.getUpdateUrl()) {
+            // history.pushState({}, action.getTitle(), "#" + action.getUrl());
+            this.setToken(url);
+            window.location.hash = url;
+        }
+
+        if (silent !== true) {
+            this.fireEvent('change', url);
+        }
+
+        this.setToken(url);
+    },
+
+    /**
+     * Navigate to the previous active action. This changes the page url.
+     */
+    back: function() {
+        var actions = this.getActions(),
+            previousAction = actions[actions.length - 2],
+            app = previousAction.getController().getApplication();
+
+        actions.pop();
+
+        app.redirectTo(previousAction.getUrl());
+    },
+
+    /**
+     * @private
+     */
+    applyToken: function(token) {
+        return token[0] == '#' ? token.substr(1) : token;
+    },
+
+    /**
+     * @private
+     */
+    detectStateChange: function() {
+        var newToken = this.applyToken(window.location.hash),
+            oldToken = this.getToken();
+
+        if (newToken != oldToken) {
+            this.onStateChange();
+            this.setToken(newToken);
+        }
+    },
+
+    /**
+     * @private
+     */
+    onStateChange: function() {
+        this.fireEvent('change', window.location.hash.substr(1));
+    }
+});
+
 /**
  * @author Ed Spencer
  *
@@ -22723,7 +23036,7 @@ Ext.define('Ext.app.Controller', {
         application: {},
 
         /**
-         * @cfg {Array} stores The set of stores to load for this Application. Each store is expected to
+         * @cfg {String[]} stores The set of stores to load for this Application. Each store is expected to
          * exist inside the *app/store* directory and define a class following the convention
          * AppName.store.StoreName. For example, in the code below, the *AppName.store.Users* class will be loaded.
          * Note that we are able to specify either the full class name (as with *AppName.store.Groups*) or just the
@@ -22739,7 +23052,7 @@ Ext.define('Ext.app.Controller', {
         stores: [],
 
         /**
-         * @cfg {Array} models The set of models to load for this Application. Each model is expected to exist inside the
+         * @cfg {String[]} models The set of models to load for this Application. Each model is expected to exist inside the
          * *app/model* directory and define a class following the convention AppName.model.ModelName. For example, in the
          * code below, the classes *AppName.model.User*, *AppName.model.Group* and *AppName.model.Product* will be loaded.
          * Note that we are able to specify either the full class name (as with *AppName.model.Product*) or just the
@@ -22947,7 +23260,8 @@ Ext.define('Ext.app.Controller', {
      * 1.x-inspired ref implementation
      */
     ref: function(refs) {
-        var refName, getterName, selector, info;
+        var me = this,
+            refName, getterName, selector, info;
 
         for (refName in refs) {
             selector = refs[refName];
@@ -22963,7 +23277,12 @@ Ext.define('Ext.app.Controller', {
                     info = refs[refName];
                 }
 
-                this[getterName] = Ext.Function.pass(this.getRef, [refName, info], this);
+                this[getterName] = function(refName, info) {
+                    var args = [refName, info];
+                    return function() {
+                        return me.getRef.apply(me, args.concat.apply(args, arguments));
+                    };
+                }(refName, info);
             }
 
             this.references = this.references || [];
@@ -24191,6 +24510,33 @@ Ext.define('Ext.app.Application', {
 });
 
 /**
+ * {@link Ext.Title} is used for the {@link Ext.Toolbar#title} configuration in the {@link Ext.Toolbar} component.
+ * @private
+ */
+Ext.define('Ext.Title', {
+    extend: 'Ext.Component',
+    xtype: 'title',
+
+    config: {
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        baseCls: 'x-title',
+
+        /**
+         * @cfg {String} title The title text
+         */
+        title: ''
+    },
+
+    // @private
+    updateTitle: function(newTitle) {
+        this.setHtml(newTitle);
+    }
+});
+
+/**
 The {@link Ext.Spacer} component is generally used to put space between items in {@link Ext.Toolbar} components.
 
 ## Examples
@@ -24336,41 +24682,15 @@ Ext.define('Ext.Spacer', {
 });
 
 /**
- * {@link Ext.Title} is used for the {@link Ext.Toolbar#title} configuration in the {@link Ext.Toolbar} component.
- * @private
- */
-Ext.define('Ext.Title', {
-    extend: 'Ext.Component',
-    xtype: 'title',
-
-    config: {
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        baseCls: 'x-title',
-
-        /**
-         * @cfg {String} title The title text
-         */
-        title: ''
-    },
-
-    // @private
-    updateTitle: function(newTitle) {
-        this.setHtml(newTitle);
-    }
-});
-
-/**
- * {@link Ext.Button} is a simple class to display a button in Sencha Touch. There are various
- * different styles of {@link Ext.Button} you can create by using the {@link #icon},
+ * A simple class to display a button in Sencha Touch.
+ * 
+ * There are various different styles of Button you can create by using the {@link #icon},
  * {@link #iconCls}, {@link #iconAlign}, {@link #iconMask}, {@link #ui}, and {@link #text}
  * configurations.
  *
  * ## Simple Button
  *
- * Here is an {@link Ext.Button} is it's simplist form:
+ * Here is a Button in it's simplest form:
  *
  *     @example miniphone
  *     var button = Ext.create('Ext.Button', {
@@ -24380,8 +24700,7 @@ Ext.define('Ext.Title', {
  *
  * ## Icons
  *
- * You can also create a {@link Ext.Button} with just an icon using the {@link #iconCls}
- * configuration:
+ * You can also create a Button with just an icon using the {@link #iconCls} configuration:
  *
  *     @example miniphone
  *     var button = Ext.create('Ext.Button', {
@@ -24479,10 +24798,10 @@ Ext.define('Ext.Title', {
  *
  * You can also use the {@link #sencha-button-ui sencha-button-ui} CSS Mixin to create your own UIs.
  *
- * ## Examples
+ * ## Example
  *
  * This example shows a bunch of icons on the screen in two toolbars. When you click on the center
- * button, it switches the iconCls on every button on the page.
+ * button, it switches the {@link #iconCls} on every button on the page.
  *
  *     @example preview
  *     Ext.createWidget('container', {
@@ -25615,6 +25934,958 @@ Ext.define('Ext.util.Grouper', {
     }
 });
 /**
+ * @class Ext.util.LineSegment
+ *
+ * Utility class that represents a line segment, constructed by two {@link Ext.util.Point}
+ */
+Ext.define('Ext.util.LineSegment', {
+    requires: ['Ext.util.Point'],
+
+    /**
+     * Creates new LineSegment out of two points.
+     * @param {Ext.util.Point} point1
+     * @param {Ext.util.Point} point2
+     */
+    constructor: function(point1, point2) {
+        var Point = Ext.util.Point;
+
+        this.point1 = Point.from(point1);
+        this.point2 = Point.from(point2);
+    },
+
+    /**
+     * Returns the point where two lines intersect.
+     * @param {Ext.util.LineSegment} lineSegment The line to intersect with.
+     * @return {Ext.util.Point}
+     */
+    intersects: function(lineSegment) {
+        var point1 = this.point1,
+            point2 = this.point2,
+            point3 = lineSegment.point1,
+            point4 = lineSegment.point2,
+            x1 = point1.x,
+            x2 = point2.x,
+            x3 = point3.x,
+            x4 = point4.x,
+            y1 = point1.y,
+            y2 = point2.y,
+            y3 = point3.y,
+            y4 = point4.y,
+            d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4),
+            xi, yi;
+
+        if (d == 0) {
+            return null;
+        }
+
+        xi = ((x3 - x4) * (x1 * y2 - y1 * x2) - (x1 - x2) * (x3 * y4 - y3 * x4)) / d;
+        yi = ((y3 - y4) * (x1 * y2 - y1 * x2) - (y1 - y2) * (x3 * y4 - y3 * x4)) / d;
+
+        if (xi < Math.min(x1, x2) || xi > Math.max(x1, x2)
+            || xi < Math.min(x3, x4) || xi > Math.max(x3, x4)
+            || yi < Math.min(y1, y2) || yi > Math.max(y1, y2)
+            || yi < Math.min(y3, y4) || yi > Math.max(y3, y4)) {
+            return null;
+        }
+
+        return new Ext.util.Point(xi, yi);
+    },
+
+    /**
+     * Returns string representation of the line. Useful for debugging.
+     * @return {String} For example `Point[12,8] Point[0,0]`
+     */
+    toString: function() {
+        return this.point1.toString() + " " + this.point2.toString();
+    }
+});
+
+/**
+ * @private
+ */
+Ext.define('Ext.field.Input', {
+    extend: 'Ext.Component',
+    xtype : 'input',
+
+    /**
+     * @event clearicontap
+     * Fires whenever the clear icon is tapped
+     * @param {Ext.field.Input} this
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event masktap
+     * @preventable doMaskTap
+     * Fires whenever a mask is tapped
+     * @param {Ext.field.Input} this
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event focus
+     * @preventable doFocus
+     * Fires whenever the input get focus
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event blur
+     * @preventable doBlur
+     * Fires whenever the input loses focus
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event click
+     * Fires whenever the input is clicked
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event keyup
+     * Fires whenever keyup is detected
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event paste
+     * Fires whenever paste is detected
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event mousedown
+     * Fires whenever the input has a mousedown occur
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @property {String} tag The el tag
+     * @private
+     */
+    tag: 'input',
+
+    cachedConfig: {
+        /**
+         * @cfg {String} cls The className to be applied to this input
+         * @accessor
+         */
+        cls: Ext.baseCSSPrefix + 'form-field',
+
+        /**
+         * @cfg {String} focusCls The CSS class to use when the field receives focus
+         * @accessor
+         */
+        focusCls: Ext.baseCSSPrefix + 'field-focus',
+
+        // @private
+        maskCls: Ext.baseCSSPrefix + 'field-mask',
+
+        /**
+         * True to use a mask on this field, or `auto` to automatically select when you should use it.
+         * @cfg {String/Boolean} useMask
+         * @private
+         * @accessor
+         */
+        useMask: 'auto',
+
+        /**
+         * @cfg {String} type The type attribute for input fields -- e.g. radio, text, password, file (defaults
+         * to 'text'). The types 'file' and 'password' must be used to render those field types currently -- there are
+         * no separate Ext components for those.
+         * @accessor
+         */
+        type: 'text',
+
+        /**
+         * @cfg {Boolean} checked <tt>true</tt> if the checkbox should render initially checked (defaults to <tt>false</tt>)
+         * @accessor
+         */
+        checked: false
+    },
+
+    config: {
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        baseCls: Ext.baseCSSPrefix + 'field-input',
+
+        /**
+         * @cfg {String} name The field's HTML name attribute
+         * <b>Note</b>: this property must be set if this field is to be automatically included with
+         * {@link Ext.form.Panel#method-submit form submit()}.
+         * @accessor
+         */
+        name: null,
+
+        /**
+         * @cfg {Mixed} value A value to initialize this field with (defaults to undefined).
+         * @accessor
+         */
+        value: null,
+
+        /**
+         * @property {Boolean} <tt>True</tt> if the field currently has focus.
+         * @accessor
+         */
+        isFocused: false,
+
+        /**
+         * @cfg {Number} tabIndex The tabIndex for this field. Note this only applies to fields that are rendered,
+         * not those which are built via applyTo (defaults to undefined).
+         * @accessor
+         */
+        tabIndex: null,
+
+        /**
+         * @cfg {String} placeHolder A string value displayed in the input (if supported) when the control is empty.
+         * @accessor
+         */
+        placeHolder: null,
+
+        /**
+         * @cfg {Number} minValue The minimum value that this Number field can accept (defaults to undefined, e.g. no minimium)
+         * @accessor
+         */
+        minValue: null,
+
+        /**
+         * @cfg {Number} maxValue The maximum value that this Number field can accept (defaults to undefined, e.g. no maximum)
+         * @accessor
+         */
+        maxValue: null,
+
+        /**
+         * @cfg {Number} stepValue The amount by which the field is incremented or decremented each time the spinner is tapped.
+         * Defaults to undefined, which means that the field goes up or down by 1 each time the spinner is tapped
+         * @accessor
+         */
+        stepValue: null,
+
+        /**
+         * @cfg {Number} maxLength The maximum number of permitted input characters (defaults to 0).
+         * @accessor
+         */
+        maxLength: null,
+
+        /**
+         * True to set the field's DOM element autocomplete attribute to "on", false to set to "off". Defaults to undefined, leaving the attribute unset
+         * @cfg {Boolean} autoComplete
+         * @accessor
+         */
+        autoComplete: null,
+
+        /**
+         * True to set the field's DOM element autocapitalize attribute to "on", false to set to "off". Defaults to undefined, leaving the attribute unset
+         * @cfg {Boolean} autoCapitalize
+         * @accessor
+         */
+        autoCapitalize: null,
+
+        /**
+         * True to set the field DOM element autocorrect attribute to "on", false to set to "off". Defaults to undefined, leaving the attribute unset.
+         * @cfg {Boolean} autoCorrect
+         * @accessor
+         */
+        autoCorrect: null,
+
+        /**
+         * True to set the field DOM element readonly attribute to "true". Defaults to undefined, leaving the attribute unset.
+         * @cfg {Boolean} readOnly
+         * @accessor
+         */
+        readOnly: null,
+
+        /**
+         * Sets the field DOM element maxRows attribute. Defaults to undefined, leaving the attribute unset.
+         * @cfg {Number} maxRows
+         * @accessor
+         */
+        maxRows: null,
+
+        /**
+         * @cfg {String} pattern The value for the HTML5 pattern attribute.
+         * You can use this to change which keyboard layout will be used.
+         *
+         *     Ext.define('Ux.field.Pattern', {
+         *         extend : 'Ext.field.Text',
+         *         xtype  : 'patternfield',
+         *         
+         *         config : {
+         *             component : {
+         *                 pattern : '[0-9]*'
+         *             }
+         *         }
+         *     });
+         *
+         * Even though it extends Ext.field.Text, it will display the number keyboard.
+         *
+         * @accessor
+         */
+        pattern: null,
+
+        /**
+         * @cfg {Boolean} disabled True to disable the field (defaults to false).
+         * <p>Be aware that conformant with the <a href="http://www.w3.org/TR/html401/interact/forms.html#h-17.12.1">HTML specification</a>,
+         * disabled Fields will not be {@link Ext.form.Panel#method-submit submitted}.</p>
+         * @accessor
+         */
+
+        /**
+         * <p>The value that the Field had at the time it was last focused. This is the value that is passed
+         * to the {@link Ext.field.Text#change} event which is fired if the value has been changed when the Field is blurred.</p>
+         * <p><b>This will be undefined until the Field has been visited.</b> Compare {@link #originalValue}.</p>
+         * @cfg {Mixed} startValue
+         * @accessor
+         */
+        startValue: false
+    },
+
+    /**
+     * @cfg {String/Number} originalValue The original value when the input is rendered
+     * @private
+     */
+
+    // @private
+    getTemplate: function() {
+        var items = [
+            {
+                reference: 'input',
+                tag: this.tag
+            },
+            {
+                reference: 'clearIcon',
+                cls: 'x-clear-icon'
+            }
+        ];
+
+        items.push({
+            reference: 'mask',
+            classList: [this.config.maskCls]
+        });
+
+        return items;
+    },
+
+    initElement: function() {
+        var me = this;
+
+        me.callParent();
+
+        me.input.on({
+            scope: me,
+
+            keyup    : 'onKeyUp',
+            focus    : 'onFocus',
+            blur     : 'onBlur',
+            paste    : 'onPaste'
+        });
+
+        me.mask.on({
+            tap: 'onMaskTap',
+            scope: me
+        });
+
+        if (me.clearIcon) {
+            me.clearIcon.on({
+                tap: 'onClearIconTap',
+                scope: me
+            });
+        }
+    },
+
+    applyUseMask: function(useMask) {
+        if (useMask === 'auto') {
+            useMask = Ext.os.is.iOS && Ext.os.version.lt('5');
+        }
+
+        return Boolean(useMask);
+    },
+
+    /**
+     * Updates the useMask configuration
+     */
+    updateUseMask: function(newUseMask) {
+        this.mask[newUseMask ? 'show' : 'hide']();
+    },
+
+    updatePattern : function (pattern) {
+        this.updateFieldAttribute('pattern', pattern);
+    },
+
+    /**
+     * Helper method to update a specified attribute on the fieldEl, or remove the attribute all together
+     * @private
+     */
+    updateFieldAttribute: function(attribute, newValue) {
+        var input = this.input;
+
+        if (newValue) {
+            input.dom.setAttribute(attribute, newValue);
+        } else {
+            input.dom.removeAttribute(attribute);
+        }
+    },
+
+    /**
+     * Updates the {@link #cls} configuration
+     */
+    updateCls: function(newCls, oldCls) {
+        this.input.addCls(Ext.baseCSSPrefix + 'input-el');
+        this.input.replaceCls(oldCls, newCls);
+    },
+
+    /**
+     * Updates the type attribute with the {@link #type} configuration
+     * @private
+     */
+    updateType: function(newType, oldType) {
+        var prefix = Ext.baseCSSPrefix + 'input-';
+
+        this.input.replaceCls(prefix + oldType, prefix + newType);
+        this.updateFieldAttribute('type', newType);
+    },
+
+    /**
+     * Updates the name attribute with the {@link #name} configuration
+     * @private
+     */
+    updateName: function(newName) {
+        this.updateFieldAttribute('name', newName);
+    },
+
+    /**
+     * Returns the field data value
+     * @return {Mixed} value The field value
+     */
+    getValue: function() {
+        var input = this.input;
+
+        if (input) {
+            this._value = input.dom.value;
+        }
+
+        return this._value;
+    },
+
+    // @private
+    applyValue: function(value) {
+        return (Ext.isEmpty(value)) ? '' : value;
+    },
+
+    /**
+     * Updates the {@link #value} configuration
+     * @private
+     */
+    updateValue: function(newValue) {
+        var input = this.input;
+
+        if (input) {
+            input.dom.value = newValue;
+        }
+    },
+
+    setValue: function(newValue) {
+        var oldValue = this._value;
+
+        this.updateValue(this.applyValue(newValue));
+
+        newValue = this.getValue();
+
+        if (String(newValue) != String(oldValue) && this.initialized) {
+            this.onChange(this, newValue, oldValue);
+        }
+
+        return this;
+    },
+
+
+    /**
+     * Updates the tabIndex attribute with the {@link #tabIndex} configuration
+     * @private
+     */
+    updateTabIndex: function(newTabIndex) {
+        this.updateFieldAttribute('tabIndex', newTabIndex);
+    },
+
+    // @private
+    testAutoFn: function(value) {
+        return [true, 'on'].indexOf(value) !== -1;
+    },
+
+
+    /**
+     * Updates the maxlength attribute with the {@link #maxLength} configuration
+     * @private
+     */
+    updateMaxLength: function(newMaxLength) {
+        this.updateFieldAttribute('maxlength', newMaxLength);
+    },
+
+    /**
+     * Updates the placeholder attribute with the {@link #placeHolder} configuration
+     * @private
+     */
+    updatePlaceHolder: function(newPlaceHolder) {
+        this.updateFieldAttribute('placeholder', newPlaceHolder);
+    },
+
+    // @private
+    applyAutoComplete: function(autoComplete) {
+        return this.testAutoFn(autoComplete);
+    },
+
+    /**
+     * Updates the autocomplete attribute with the {@link #autoComplete} configuration
+     * @private
+     */
+    updateAutoComplete: function(newAutoComplete) {
+        var value = newAutoComplete ? 'on' : 'off';
+        this.updateFieldAttribute('autocomplete', value);
+    },
+
+    // @private
+    applyAutoCapitalize: function(autoCapitalize) {
+        return this.testAutoFn(autoCapitalize);
+    },
+
+    /**
+     * Updates the autocapitalize attribute with the {@link #autoCapitalize} configuration
+     * @private
+     */
+    updateAutoCapitalize: function(newAutoCapitalize) {
+        var value = newAutoCapitalize ? 'on' : 'off';
+        this.updateFieldAttribute('autocapitalize', value);
+    },
+
+    // @private
+    applyAutoCorrect: function(autoCorrect) {
+        return this.testAutoFn(autoCorrect);
+    },
+
+    /**
+     * Updates the autocorrect attribute with the {@link #autoCorrect} configuration
+     * @private
+     */
+    updateAutoCorrect: function(newAutoCorrect) {
+        var value = newAutoCorrect ? 'on' : 'off';
+        this.updateFieldAttribute('autocorrect', value);
+    },
+
+    /**
+     * Updates the min attribute with the {@link #minValue} configuration
+     * @private
+     */
+    updateMinValue: function(newMinValue) {
+        this.updateFieldAttribute('min', newMinValue);
+    },
+
+    /**
+     * Updates the max attribute with the {@link #maxValue} configuration
+     * @private
+     */
+    updateMaxValue: function(newMaxValue) {
+        this.updateFieldAttribute('max', newMaxValue);
+    },
+
+    /**
+     * Updates the step attribute with the {@link #stepValue} configuration
+     * @private
+     */
+    updateStepValue: function(newStepValue) {
+        this.updateFieldAttribute('step', newStepValue);
+    },
+
+    // @private
+    checkedRe: /^(true|1|on)/i,
+
+    /**
+     * Returns the checked value of this field
+     * @return {Mixed} value The field value
+     */
+    getChecked: function() {
+        var el = this.input,
+            checked;
+
+        if (el) {
+            checked = el.dom.checked;
+            this._checked = checked;
+        }
+
+        return checked;
+    },
+
+    // @private
+    applyChecked: function(checked) {
+        return !!this.checkedRe.test(String(checked));
+    },
+
+    setChecked: function(newChecked) {
+        this.updateChecked(this.applyChecked(newChecked));
+        this._checked = newChecked;
+    },
+
+    /**
+     * Updates the autocorrect attribute with the {@link #autoCorrect} configuration
+     * @private
+     */
+    updateChecked: function(newChecked) {
+        this.input.dom.checked = newChecked;
+    },
+
+    /**
+     * Updates the readonly attribute with the {@link #readOnly} configuration
+     * @private
+     */
+    updateReadOnly: function(readOnly) {
+        this.updateFieldAttribute('readonly', readOnly);
+    },
+
+
+    updateMaxRows: function(newRows) {
+        this.updateFieldAttribute('rows', newRows);
+    },
+
+    doSetDisabled: function(disabled) {
+        this.callParent(arguments);
+
+        this.input.dom.disabled = disabled;
+
+        if (!disabled) {
+            this.blur();
+        }
+    },
+
+    /**
+     * <p>Returns true if the value of this Field has been changed from its original value.
+     * Will return false if the field is disabled or has not been rendered yet.</p>
+     */
+    isDirty: function() {
+        if (this.getDisabled()) {
+            return false;
+        }
+
+        return String(this.getValue()) !== String(this.originalValue);
+    },
+
+    /**
+     * Resets the current field value to the original value.
+     */
+    reset: function() {
+        this.setValue(this.originalValue);
+    },
+
+    // @private
+    onMaskTap: function(e) {
+        this.fireAction('masktap', [this, e], 'doMaskTap');
+    },
+
+    // @private
+    doMaskTap: function(me, e) {
+        if (me.getDisabled()) {
+            return false;
+        }
+
+        me.maskCorrectionTimer = Ext.defer(me.showMask, 1000, me);
+        me.hideMask();
+    },
+
+    // @private
+    showMask: function(e) {
+        if (this.mask) {
+            this.mask.setStyle('display', 'block');
+        }
+    },
+
+    // @private
+    hideMask: function(e) {
+        if (this.mask) {
+            this.mask.setStyle('display', 'none');
+        }
+    },
+
+    /**
+     * Attempts to set the field as the active input focus.
+     * @return {Ext.field.Input} this
+     */
+    focus: function() {
+        var me = this,
+            el = me.input;
+
+        if (el && el.dom.focus) {
+            el.dom.focus();
+        }
+        return me;
+    },
+
+    /**
+     * Attempts to forcefully blur input focus for the field.
+     * @return {Ext.field.Input} this
+     */
+    blur: function() {
+        var me = this,
+            el = this.input;
+
+        if (el && el.dom.blur) {
+            el.dom.blur();
+        }
+        return me;
+    },
+
+    /**
+     * Attempts to forcefully select all the contents of the input field.
+     * @return {Ext.field.Input} this
+     */
+    select: function() {
+        var me = this,
+            el = me.input;
+
+        if (el && el.dom.setSelectionRange) {
+            el.dom.setSelectionRange(0, 9999);
+        }
+        return me;
+    },
+
+    onFocus: function(e) {
+        this.fireAction('focus', [e], 'doFocus');
+    },
+
+    // @private
+    doFocus: function(e) {
+        var me = this;
+
+        if (me.mask) {
+            if (me.maskCorrectionTimer) {
+                clearTimeout(me.maskCorrectionTimer);
+            }
+            me.hideMask();
+        }
+
+        if (!me.getIsFocused()) {
+            me.setIsFocused(true);
+            me.setStartValue(me.getValue());
+        }
+    },
+
+    onBlur: function(e) {
+        this.fireAction('blur', [e], 'doBlur');
+    },
+
+    // @private
+    doBlur: function(e) {
+        var me         = this,
+            value      = me.getValue(),
+            startValue = me.getStartValue();
+
+        me.setIsFocused(false);
+
+        if (String(value) != String(startValue)) {
+            me.onChange(me, value, startValue);
+        }
+
+        me.showMask();
+    },
+
+    // @private
+    onClearIconTap: function(e) {
+        this.fireEvent('clearicontap', this, e);
+
+        //focus the field after cleartap happens, but only on android.
+        //this is to stop the keyboard from hiding. TOUCH-2064
+        if (Ext.os.is.Android) {
+            this.focus();
+        }
+    },
+
+    onClick: function(e) {
+        this.fireEvent('click', e);
+    },
+
+    onChange: function(me, value, startValue) {
+        this.fireEvent('change', me, value, startValue);
+    },
+
+    onKeyUp: function(e) {
+        this.fireEvent('keyup', e);
+    },
+
+    onPaste: function(e) {
+        this.fireEvent('paste', e);
+    },
+
+    onMouseDown: function(e) {
+        this.fireEvent('mousedown', e);
+    }
+});
+
+/**
+ * @class Ext.Decorator
+ * @extend Ext.Component
+ *
+ * In a few words, a Decorator is a Component that wraps around another Component. A typical example of a Decorator is a
+ * {@link Ext.field.Field Field}. A form field is nothing more than a decorator around another component, and gives the
+ * component a label, as well as extra styling to make it look good in a form.
+ *
+ * A Decorator can be thought of as a lightweight Container that has only one child item, and no layout overhead.
+ * The look and feel of decorators can be styled purely in CSS.
+ *
+ * Another powerful feature that Decorator provides is config proxying. For example: all config items of a
+ * {@link Ext.slider.Slider Slider} also exist in a {@link Ext.field.Slider Slider Field} for API convenience.
+ * The {@link Ext.field.Slider Slider Field} simply proxies all corresponding getters and setters
+ * to the actual {@link Ext.slider.Slider Slider} instance. Writing out all the setters and getters to do that is a tedious task
+ * and a waste of code space. Instead, when you sub-class Ext.Decorator, all you need to do is to specify those config items
+ * that you want to proxy to the Component using a special 'proxyConfig' class property. Here's how it may look like
+ * in a Slider Field class:
+ *
+ *     Ext.define('My.field.Slider', {
+ *         extend: 'Ext.Decorator',
+ *
+ *         config: {
+ *             component: {
+ *                 xtype: 'slider'
+ *             }
+ *         },
+ *
+ *         proxyConfig: {
+ *             minValue: 0,
+ *             maxValue: 100,
+ *             increment: 1
+ *         }
+ *
+ *         // ...
+ *     });
+ *
+ * Once `My.field.Slider` class is created, it will have all setters and getters methods for all items listed in `proxyConfig`
+ * automatically generated. These methods all proxy to the same method names that exist within the Component instance.
+ */
+Ext.define('Ext.Decorator', {
+    extend: 'Ext.Component',
+
+    isDecorator: true,
+
+    config: {
+        /**
+         * @cfg {Object} component The config object to factory the Component that this Decorator wraps around
+         */
+        component: {}
+    },
+
+    statics: {
+        generateProxySetter: function(name) {
+            return function(value) {
+                var component = this.getComponent();
+                component[name].call(component, value);
+
+                return this;
+            }
+        },
+        generateProxyGetter: function(name) {
+            return function() {
+                var component = this.getComponent();
+                return component[name].call(component);
+            }
+        }
+    },
+
+    onClassExtended: function(Class, members) {
+        if (!members.hasOwnProperty('proxyConfig')) {
+            return;
+        }
+
+        var ExtClass = Ext.Class,
+            proxyConfig = members.proxyConfig,
+            config = members.config;
+
+        members.config = (config) ? Ext.applyIf(config, proxyConfig) : proxyConfig;
+
+        var name, nameMap, setName, getName;
+
+        for (name in proxyConfig) {
+            if (proxyConfig.hasOwnProperty(name)) {
+                nameMap = ExtClass.getConfigNameMap(name);
+                setName = nameMap.set;
+                getName = nameMap.get;
+
+                members[setName] = this.generateProxySetter(setName);
+                members[getName] = this.generateProxyGetter(getName);
+            }
+        }
+    },
+
+    // @private
+    applyComponent: function(config) {
+        return Ext.factory(config, Ext.Component);
+    },
+
+    // @private
+    updateComponent: function(newComponent, oldComponent) {
+        if (oldComponent) {
+            if (this.isRendered() && oldComponent.setRendered(false)) {
+                oldComponent.fireAction('renderedchange', [this, oldComponent, false],
+                    'doUnsetComponent', this, { args: [oldComponent] });
+            }
+            else {
+                this.doUnsetComponent(oldComponent);
+            }
+        }
+
+        if (newComponent) {
+            if (this.isRendered() && newComponent.setRendered(true)) {
+                newComponent.fireAction('renderedchange', [this, newComponent, true],
+                    'doSetComponent', this, { args: [newComponent] });
+            }
+            else {
+                this.doSetComponent(newComponent);
+            }
+        }
+    },
+
+    // @private
+    doUnsetComponent: function(component) {
+        if (component.renderElement.dom) {
+            this.innerElement.dom.removeChild(component.renderElement.dom);
+        }
+    },
+
+    // @private
+    doSetComponent: function(component) {
+        if (component.renderElement.dom) {
+            this.innerElement.dom.appendChild(component.renderElement.dom);
+        }
+    },
+
+    // @private
+    setRendered: function(rendered) {
+        var component;
+
+        if (this.callParent(arguments)) {
+            component = this.getComponent();
+
+            if (component) {
+                component.setRendered(rendered);
+            }
+
+            return true;
+        }
+
+        return false;
+    },
+
+    // @private
+    setDisabled: function(disabled) {
+        this.callParent(arguments);
+        this.getComponent().setDisabled(disabled);
+    },
+
+    destroy: function() {
+        Ext.destroy(this.getComponent());
+        this.callParent();
+    }
+});
+
+/**
  * @private
  */
 Ext.define('Ext.mixin.Filterable', {
@@ -26231,933 +27502,6 @@ Ext.define('Ext.mixin.Sortable', {
 });
 
 /**
- * @class Ext.util.LineSegment
- *
- * Utility class that represents a line segment, constructed by two {@link Ext.util.Point}
- */
-Ext.define('Ext.util.LineSegment', {
-    requires: ['Ext.util.Point'],
-
-    /**
-     * Creates new LineSegment out of two points.
-     * @param {Ext.util.Point} point1
-     * @param {Ext.util.Point} point2
-     */
-    constructor: function(point1, point2) {
-        var Point = Ext.util.Point;
-
-        this.point1 = Point.from(point1);
-        this.point2 = Point.from(point2);
-    },
-
-    /**
-     * Returns the point where two lines intersect.
-     * @param {Ext.util.LineSegment} lineSegment The line to intersect with.
-     * @return {Ext.util.Point}
-     */
-    intersects: function(lineSegment) {
-        var point1 = this.point1,
-            point2 = this.point2,
-            point3 = lineSegment.point1,
-            point4 = lineSegment.point2,
-            x1 = point1.x,
-            x2 = point2.x,
-            x3 = point3.x,
-            x4 = point4.x,
-            y1 = point1.y,
-            y2 = point2.y,
-            y3 = point3.y,
-            y4 = point4.y,
-            d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4),
-            xi, yi;
-
-        if (d == 0) {
-            return null;
-        }
-
-        xi = ((x3 - x4) * (x1 * y2 - y1 * x2) - (x1 - x2) * (x3 * y4 - y3 * x4)) / d;
-        yi = ((y3 - y4) * (x1 * y2 - y1 * x2) - (y1 - y2) * (x3 * y4 - y3 * x4)) / d;
-
-        if (xi < Math.min(x1, x2) || xi > Math.max(x1, x2)
-            || xi < Math.min(x3, x4) || xi > Math.max(x3, x4)
-            || yi < Math.min(y1, y2) || yi > Math.max(y1, y2)
-            || yi < Math.min(y3, y4) || yi > Math.max(y3, y4)) {
-            return null;
-        }
-
-        return new Ext.util.Point(xi, yi);
-    },
-
-    /**
-     * Returns string representation of the line. Useful for debugging.
-     * @return {String} For example `Point[12,8] Point[0,0]`
-     */
-    toString: function() {
-        return this.point1.toString() + " " + this.point2.toString();
-    }
-});
-
-/**
- * @private
- */
-Ext.define('Ext.field.Input', {
-    extend: 'Ext.Component',
-    xtype : 'input',
-
-    /**
-     * @event clearicontap
-     * Fires whenever the clear icon is tapped
-     * @param {Ext.field.Input} this
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event masktap
-     * @preventable doMaskTap
-     * Fires whenever a mask is tapped
-     * @param {Ext.field.Input} this
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event focus
-     * @preventable doFocus
-     * Fires whenever the input get focus
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event blur
-     * @preventable doBlur
-     * Fires whenever the input loses focus
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event click
-     * Fires whenever the input is clicked
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event keyup
-     * Fires whenever keyup is detected
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event paste
-     * Fires whenever paste is detected
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event mousedown
-     * Fires whenever the input has a mousedown occur
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @property {String} tag The el tag
-     * @private
-     */
-    tag: 'input',
-
-    cachedConfig: {
-        /**
-         * @cfg {String} cls The className to be applied to this input
-         * @accessor
-         */
-        cls: Ext.baseCSSPrefix + 'form-field',
-
-        /**
-         * @cfg {String} focusCls The CSS class to use when the field receives focus
-         * @accessor
-         */
-        focusCls: Ext.baseCSSPrefix + 'field-focus',
-
-        // @private
-        maskCls: Ext.baseCSSPrefix + 'field-mask',
-
-        /**
-         * True to use a mask on this field, or `auto` to automatically select when you should use it.
-         * @cfg {String/Boolean} useMask
-         * @private
-         * @accessor
-         */
-        useMask: 'auto',
-
-        /**
-         * @cfg {String} type The type attribute for input fields -- e.g. radio, text, password, file (defaults
-         * to 'text'). The types 'file' and 'password' must be used to render those field types currently -- there are
-         * no separate Ext components for those.
-         * @accessor
-         */
-        type: 'text',
-
-        /**
-         * @cfg {Boolean} checked <tt>true</tt> if the checkbox should render initially checked (defaults to <tt>false</tt>)
-         * @accessor
-         */
-        checked: false
-    },
-
-    config: {
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        baseCls: Ext.baseCSSPrefix + 'field-input',
-
-        /**
-         * @cfg {String} name The field's HTML name attribute
-         * <b>Note</b>: this property must be set if this field is to be automatically included with
-         * {@link Ext.form.Panel#method-submit form submit()}.
-         * @accessor
-         */
-        name: null,
-
-        /**
-         * @cfg {Mixed} value A value to initialize this field with (defaults to undefined).
-         * @accessor
-         */
-        value: null,
-
-        /**
-         * @property {Boolean} <tt>True</tt> if the field currently has focus.
-         * @accessor
-         */
-        isFocused: false,
-
-        /**
-         * @cfg {Number} tabIndex The tabIndex for this field. Note this only applies to fields that are rendered,
-         * not those which are built via applyTo (defaults to undefined).
-         * @accessor
-         */
-        tabIndex: null,
-
-        /**
-         * @cfg {String} placeHolder A string value displayed in the input (if supported) when the control is empty.
-         * @accessor
-         */
-        placeHolder: null,
-
-        /**
-         * @cfg {Number} minValue The minimum value that this Number field can accept (defaults to undefined, e.g. no minimium)
-         * @accessor
-         */
-        minValue: null,
-
-        /**
-         * @cfg {Number} maxValue The maximum value that this Number field can accept (defaults to undefined, e.g. no maximum)
-         * @accessor
-         */
-        maxValue: null,
-
-        /**
-         * @cfg {Number} stepValue The amount by which the field is incremented or decremented each time the spinner is tapped.
-         * Defaults to undefined, which means that the field goes up or down by 1 each time the spinner is tapped
-         * @accessor
-         */
-        stepValue: null,
-
-        /**
-         * @cfg {Number} maxLength The maximum number of permitted input characters (defaults to 0).
-         * @accessor
-         */
-        maxLength: null,
-
-        /**
-         * True to set the field's DOM element autocomplete attribute to "on", false to set to "off". Defaults to undefined, leaving the attribute unset
-         * @cfg {Boolean} autoComplete
-         * @accessor
-         */
-        autoComplete: null,
-
-        /**
-         * True to set the field's DOM element autocapitalize attribute to "on", false to set to "off". Defaults to undefined, leaving the attribute unset
-         * @cfg {Boolean} autoCapitalize
-         * @accessor
-         */
-        autoCapitalize: null,
-
-        /**
-         * True to set the field DOM element autocorrect attribute to "on", false to set to "off". Defaults to undefined, leaving the attribute unset.
-         * @cfg {Boolean} autoCorrect
-         * @accessor
-         */
-        autoCorrect: null,
-
-        /**
-         * True to set the field DOM element readonly attribute to "true". Defaults to undefined, leaving the attribute unset.
-         * @cfg {Boolean} readOnly
-         * @accessor
-         */
-        readOnly: null,
-
-        /**
-         * Sets the field DOM element maxRows attribute. Defaults to undefined, leaving the attribute unset.
-         * @cfg {Number} maxRows
-         * @accessor
-         */
-        maxRows: null,
-
-        /**
-         * @cfg {Boolean} disabled True to disable the field (defaults to false).
-         * <p>Be aware that conformant with the <a href="http://www.w3.org/TR/html401/interact/forms.html#h-17.12.1">HTML specification</a>,
-         * disabled Fields will not be {@link Ext.form.Panel#method-submit submitted}.</p>
-         * @accessor
-         */
-
-        /**
-         * <p>The value that the Field had at the time it was last focused. This is the value that is passed
-         * to the {@link Ext.field.Text#change} event which is fired if the value has been changed when the Field is blurred.</p>
-         * <p><b>This will be undefined until the Field has been visited.</b> Compare {@link #originalValue}.</p>
-         * @cfg {Mixed} startValue
-         * @accessor
-         */
-        startValue: false
-    },
-
-    /**
-     * @cfg {String/Number} originalValue The original value when the input is rendered
-     * @private
-     */
-
-    // @private
-    getTemplate: function() {
-        var items = [
-            {
-                reference: 'input',
-                tag: this.tag
-            },
-            {
-                reference: 'clearIcon',
-                cls: 'x-clear-icon'
-            }
-        ];
-
-        items.push({
-            reference: 'mask',
-            classList: [this.config.maskCls]
-        });
-
-        return items;
-    },
-
-    initElement: function() {
-        var me = this;
-
-        me.callParent();
-
-        me.input.on({
-            scope: me,
-
-            keyup    : 'onKeyUp',
-            focus    : 'onFocus',
-            blur     : 'onBlur',
-            paste    : 'onPaste'
-        });
-
-        me.mask.on({
-            tap: 'onMaskTap',
-            scope: me
-        });
-
-        if (me.clearIcon) {
-            me.clearIcon.on({
-                tap: 'onClearIconTap',
-                scope: me
-            });
-        }
-    },
-
-    applyUseMask: function(useMask) {
-        if (useMask === 'auto') {
-            useMask = Ext.os.is.iOS && Ext.os.version.lt('5');
-        }
-
-        return Boolean(useMask);
-    },
-
-    /**
-     * Updates the useMask configuration
-     */
-    updateUseMask: function(newUseMask) {
-        this.mask[newUseMask ? 'show' : 'hide']();
-    },
-
-    /**
-     * Helper method to update a specified attribute on the fieldEl, or remove the attribute all together
-     * @private
-     */
-    updateFieldAttribute: function(attribute, newValue) {
-        var input = this.input;
-
-        if (newValue) {
-            input.dom.setAttribute(attribute, newValue);
-        } else {
-            input.dom.removeAttribute(attribute);
-        }
-    },
-
-    /**
-     * Updates the {@link #cls} configuration
-     */
-    updateCls: function(newCls, oldCls) {
-        this.input.addCls(Ext.baseCSSPrefix + 'input-el');
-        this.input.replaceCls(oldCls, newCls);
-    },
-
-    /**
-     * Updates the type attribute with the {@link #type} configuration
-     * @private
-     */
-    updateType: function(newType, oldType) {
-        var prefix = Ext.baseCSSPrefix + 'input-';
-
-        this.input.replaceCls(prefix + oldType, prefix + newType);
-        this.updateFieldAttribute('type', newType);
-    },
-
-    /**
-     * Updates the name attribute with the {@link #name} configuration
-     * @private
-     */
-    updateName: function(newName) {
-        this.updateFieldAttribute('name', newName);
-    },
-
-    /**
-     * Returns the field data value
-     * @return {Mixed} value The field value
-     */
-    getValue: function() {
-        var input = this.input;
-
-        if (input) {
-            this._value = input.dom.value;
-        }
-
-        return this._value;
-    },
-
-    // @private
-    applyValue: function(value) {
-        return (Ext.isEmpty(value)) ? '' : value;
-    },
-
-    /**
-     * Updates the {@link #value} configuration
-     * @private
-     */
-    updateValue: function(newValue) {
-        var input = this.input;
-
-        if (input) {
-            input.dom.value = newValue;
-        }
-    },
-
-    setValue: function(newValue) {
-        var oldValue = this._value;
-
-        this.updateValue(this.applyValue(newValue));
-
-        newValue = this.getValue();
-
-        if (String(newValue) != String(oldValue) && this.initialized) {
-            this.onChange(this, newValue, oldValue);
-        }
-
-        return this;
-    },
-
-
-    /**
-     * Updates the tabIndex attribute with the {@link #tabIndex} configuration
-     * @private
-     */
-    updateTabIndex: function(newTabIndex) {
-        this.updateFieldAttribute('tabIndex', newTabIndex);
-    },
-
-    // @private
-    testAutoFn: function(value) {
-        return [true, 'on'].indexOf(value) !== -1;
-    },
-
-
-    /**
-     * Updates the maxlength attribute with the {@link #maxLength} configuration
-     * @private
-     */
-    updateMaxLength: function(newMaxLength) {
-        this.updateFieldAttribute('maxlength', newMaxLength);
-    },
-
-    /**
-     * Updates the placeholder attribute with the {@link #placeHolder} configuration
-     * @private
-     */
-    updatePlaceHolder: function(newPlaceHolder) {
-        this.updateFieldAttribute('placeholder', newPlaceHolder);
-    },
-
-    // @private
-    applyAutoComplete: function(autoComplete) {
-        return this.testAutoFn(autoComplete);
-    },
-
-    /**
-     * Updates the autocomplete attribute with the {@link #autoComplete} configuration
-     * @private
-     */
-    updateAutoComplete: function(newAutoComplete) {
-        var value = newAutoComplete ? 'on' : 'off';
-        this.updateFieldAttribute('autocomplete', value);
-    },
-
-    // @private
-    applyAutoCapitalize: function(autoCapitalize) {
-        return this.testAutoFn(autoCapitalize);
-    },
-
-    /**
-     * Updates the autocapitalize attribute with the {@link #autoCapitalize} configuration
-     * @private
-     */
-    updateAutoCapitalize: function(newAutoCapitalize) {
-        var value = newAutoCapitalize ? 'on' : 'off';
-        this.updateFieldAttribute('autocapitalize', value);
-    },
-
-    // @private
-    applyAutoCorrect: function(autoCorrect) {
-        return this.testAutoFn(autoCorrect);
-    },
-
-    /**
-     * Updates the autocorrect attribute with the {@link #autoCorrect} configuration
-     * @private
-     */
-    updateAutoCorrect: function(newAutoCorrect) {
-        var value = newAutoCorrect ? 'on' : 'off';
-        this.updateFieldAttribute('autocorrect', value);
-    },
-
-    /**
-     * Updates the min attribute with the {@link #minValue} configuration
-     * @private
-     */
-    updateMinValue: function(newMinValue) {
-        this.updateFieldAttribute('min', newMinValue);
-    },
-
-    /**
-     * Updates the max attribute with the {@link #maxValue} configuration
-     * @private
-     */
-    updateMaxValue: function(newMaxValue) {
-        this.updateFieldAttribute('max', newMaxValue);
-    },
-
-    /**
-     * Updates the step attribute with the {@link #stepValue} configuration
-     * @private
-     */
-    updateStepValue: function(newStepValue) {
-        this.updateFieldAttribute('step', newStepValue);
-    },
-
-    // @private
-    checkedRe: /^(true|1|on)/i,
-
-    /**
-     * Returns the checked value of this field
-     * @return {Mixed} value The field value
-     */
-    getChecked: function() {
-        var el = this.input,
-            checked;
-
-        if (el) {
-            checked = el.dom.checked;
-            this._checked = checked;
-        }
-
-        return checked;
-    },
-
-    // @private
-    applyChecked: function(checked) {
-        return !!this.checkedRe.test(String(checked));
-    },
-
-    setChecked: function(newChecked) {
-        this.updateChecked(this.applyChecked(newChecked));
-        this._checked = newChecked;
-    },
-
-    /**
-     * Updates the autocorrect attribute with the {@link #autoCorrect} configuration
-     * @private
-     */
-    updateChecked: function(newChecked) {
-        this.input.dom.checked = newChecked;
-    },
-
-    /**
-     * Updates the readonly attribute with the {@link #readOnly} configuration
-     * @private
-     */
-    updateReadOnly: function(readOnly) {
-        this.updateFieldAttribute('readonly', readOnly);
-    },
-
-
-    updateMaxRows: function(newRows) {
-        this.updateFieldAttribute('rows', newRows);
-    },
-
-    doSetDisabled: function(disabled) {
-        this.callParent(arguments);
-
-        this.input.dom.disabled = disabled;
-
-        if (!disabled) {
-            this.blur();
-        }
-    },
-
-    /**
-     * <p>Returns true if the value of this Field has been changed from its original value.
-     * Will return false if the field is disabled or has not been rendered yet.</p>
-     */
-    isDirty: function() {
-        if (this.getDisabled()) {
-            return false;
-        }
-
-        return String(this.getValue()) !== String(this.originalValue);
-    },
-
-    /**
-     * Resets the current field value to the original value.
-     */
-    reset: function() {
-        this.setValue(this.originalValue);
-    },
-
-    // @private
-    onMaskTap: function(e) {
-        this.fireAction('masktap', [this, e], 'doMaskTap');
-    },
-
-    // @private
-    doMaskTap: function(me, e) {
-        if (me.getDisabled()) {
-            return false;
-        }
-
-        me.maskCorrectionTimer = Ext.defer(me.showMask, 1000, me);
-        me.hideMask();
-    },
-
-    // @private
-    showMask: function(e) {
-        if (this.mask) {
-            this.mask.setStyle('display', 'block');
-        }
-    },
-
-    // @private
-    hideMask: function(e) {
-        if (this.mask) {
-            this.mask.setStyle('display', 'none');
-        }
-    },
-
-    /**
-     * Attempts to set the field as the active input focus.
-     * @return {Ext.field.Input} this
-     */
-    focus: function() {
-        var me = this,
-            el = me.input;
-
-        if (el && el.dom.focus) {
-            el.dom.focus();
-        }
-        return me;
-    },
-
-    /**
-     * Attempts to forcefully blur input focus for the field.
-     * @return {Ext.field.Input} this
-     */
-    blur: function() {
-        var me = this,
-            el = this.input;
-
-        if (el && el.dom.blur) {
-            el.dom.blur();
-        }
-        return me;
-    },
-
-    /**
-     * Attempts to forcefully select all the contents of the input field.
-     * @return {Ext.field.Input} this
-     */
-    select: function() {
-        var me = this,
-            el = me.input;
-
-        if (el && el.dom.setSelectionRange) {
-            el.dom.setSelectionRange(0, 9999);
-        }
-        return me;
-    },
-
-    onFocus: function(e) {
-        this.fireAction('focus', [e], 'doFocus');
-    },
-
-    // @private
-    doFocus: function(e) {
-        var me = this;
-
-        if (me.mask) {
-            if (me.maskCorrectionTimer) {
-                clearTimeout(me.maskCorrectionTimer);
-            }
-            me.hideMask();
-        }
-
-        if (!me.getIsFocused()) {
-            me.setIsFocused(true);
-            me.setStartValue(me.getValue());
-        }
-    },
-
-    onBlur: function(e) {
-        this.fireAction('blur', [e], 'doBlur');
-    },
-
-    // @private
-    doBlur: function(e) {
-        var me         = this,
-            value      = me.getValue(),
-            startValue = me.getStartValue();
-
-        me.setIsFocused(false);
-
-        if (String(value) != String(startValue)) {
-            me.onChange(me, value, startValue);
-        }
-
-        me.showMask();
-    },
-
-    // @private
-    onClearIconTap: function(e) {
-        this.fireEvent('clearicontap', this, e);
-
-        //focus the field after cleartap happens, but only on android.
-        //this is to stop the keyboard from hiding. TOUCH-2064
-        if (Ext.os.is.Android) {
-            this.focus();
-        }
-    },
-
-    onClick: function(e) {
-        this.fireEvent('click', e);
-    },
-
-    onChange: function(me, value, startValue) {
-        this.fireEvent('change', me, value, startValue);
-    },
-
-    onKeyUp: function(e) {
-        this.fireEvent('keyup', e);
-    },
-
-    onPaste: function(e) {
-        this.fireEvent('paste', e);
-    },
-
-    onMouseDown: function(e) {
-        this.fireEvent('mousedown', e);
-    }
-});
-
-/**
- * @class Ext.Decorator
- * @extend Ext.Component
- *
- * In a few words, a Decorator is a Component that wraps around another Component. A typical example of a Decorator is a
- * {@link Ext.field.Field Field}. A form field is nothing more than a decorator around another component, and gives the
- * component a label, as well as extra styling to make it look good in a form.
- *
- * A Decorator can be thought of as a lightweight Container that has only one child item, and no layout overhead.
- * The look and feel of decorators can be styled purely in CSS.
- *
- * Another powerful feature that Decorator provides is config proxying. For example: all config items of a
- * {@link Ext.slider.Slider Slider} also exist in a {@link Ext.field.Slider Slider Field} for API convenience.
- * The {@link Ext.field.Slider Slider Field} simply proxies all corresponding getters and setters
- * to the actual {@link Ext.slider.Slider Slider} instance. Writing out all the setters and getters to do that is a tedious task
- * and a waste of code space. Instead, when you sub-class Ext.Decorator, all you need to do is to specify those config items
- * that you want to proxy to the Component using a special 'proxyConfig' class property. Here's how it may look like
- * in a Slider Field class:
- *
- *     Ext.define('My.field.Slider', {
- *         extend: 'Ext.Decorator',
- *
- *         config: {
- *             component: {
- *                 xtype: 'slider'
- *             }
- *         },
- *
- *         proxyConfig: {
- *             minValue: 0,
- *             maxValue: 100,
- *             increment: 1
- *         }
- *
- *         // ...
- *     });
- *
- * Once `My.field.Slider` class is created, it will have all setters and getters methods for all items listed in `proxyConfig`
- * automatically generated. These methods all proxy to the same method names that exist within the Component instance.
- */
-Ext.define('Ext.Decorator', {
-    extend: 'Ext.Component',
-
-    isDecorator: true,
-
-    config: {
-        /**
-         * @cfg {Object} component The config object to factory the Component that this Decorator wraps around
-         */
-        component: {}
-    },
-
-    statics: {
-        generateProxySetter: function(name) {
-            return function(value) {
-                var component = this.getComponent();
-                component[name].call(component, value);
-
-                return this;
-            }
-        },
-        generateProxyGetter: function(name) {
-            return function() {
-                var component = this.getComponent();
-                return component[name].call(component);
-            }
-        }
-    },
-
-    onClassExtended: function(Class, members) {
-        if (!members.hasOwnProperty('proxyConfig')) {
-            return;
-        }
-
-        var ExtClass = Ext.Class,
-            proxyConfig = members.proxyConfig,
-            config = members.config;
-
-        members.config = (config) ? Ext.applyIf(config, proxyConfig) : proxyConfig;
-
-        var name, nameMap, setName, getName;
-
-        for (name in proxyConfig) {
-            if (proxyConfig.hasOwnProperty(name)) {
-                nameMap = ExtClass.getConfigNameMap(name);
-                setName = nameMap.set;
-                getName = nameMap.get;
-
-                members[setName] = this.generateProxySetter(setName);
-                members[getName] = this.generateProxyGetter(getName);
-            }
-        }
-    },
-
-    // @private
-    applyComponent: function(config) {
-        return Ext.factory(config, Ext.Component);
-    },
-
-    // @private
-    updateComponent: function(newComponent, oldComponent) {
-        if (oldComponent) {
-            if (this.isRendered() && oldComponent.setRendered(false)) {
-                oldComponent.fireAction('renderedchange', [this, oldComponent, false],
-                    'doUnsetComponent', this, { args: [oldComponent] });
-            }
-            else {
-                this.doUnsetComponent(oldComponent);
-            }
-        }
-
-        if (newComponent) {
-            if (this.isRendered() && newComponent.setRendered(true)) {
-                newComponent.fireAction('renderedchange', [this, newComponent, true],
-                    'doSetComponent', this, { args: [newComponent] });
-            }
-            else {
-                this.doSetComponent(newComponent);
-            }
-        }
-    },
-
-    // @private
-    doUnsetComponent: function(component) {
-        if (component.renderElement.dom) {
-            this.innerElement.dom.removeChild(component.renderElement.dom);
-        }
-    },
-
-    // @private
-    doSetComponent: function(component) {
-        if (component.renderElement.dom) {
-            this.innerElement.dom.appendChild(component.renderElement.dom);
-        }
-    },
-
-    // @private
-    setRendered: function(rendered) {
-        var component;
-
-        if (this.callParent(arguments)) {
-            component = this.getComponent();
-
-            if (component) {
-                component.setRendered(rendered);
-            }
-
-            return true;
-        }
-
-        return false;
-    },
-
-    // @private
-    setDisabled: function(disabled) {
-        this.callParent(arguments);
-        this.getComponent().setDisabled(disabled);
-    },
-
-    destroy: function() {
-        Ext.destroy(this.getComponent());
-        this.callParent();
-    }
-});
-
-/**
  * @author Tommy Maintz
  *
  * This class is the simple default id generator for Model instances.
@@ -27196,162 +27540,268 @@ Ext.define('Ext.data.identifier.Simple', {
     }
 });
 /**
- * @class Ext.data.SortTypes
- * This class defines a series of static methods that are used on a
- * {@link Ext.data.Field} for performing sorting. The methods cast the
- * underlying values into a data type that is appropriate for sorting on
- * that particular field.  If a {@link Ext.data.Field#type} is specified,
- * the sortType will be set to a sane default if the sortType is not
- * explicitly defined on the field. The sortType will make any necessary
- * modifications to the value and return it.
- * <ul>
- * <li><b>asText</b> - Removes any tags and converts the value to a string</li>
- * <li><b>asUCText</b> - Removes any tags and converts the value to an uppercase string</li>
- * <li><b>asUCText</b> - Converts the value to an uppercase string</li>
- * <li><b>asDate</b> - Converts the value into Unix epoch time</li>
- * <li><b>asFloat</b> - Converts the value to a floating point number</li>
- * <li><b>asInt</b> - Converts the value to an integer number</li>
- * </ul>
- * <p>
- * It is also possible to create a custom sortType that can be used throughout
- * an application.
- * <pre><code>
-Ext.apply(Ext.data.SortTypes, {
-    asPerson: function(person){
-        // expects an object with a first and last name property
-        return person.lastName.toUpperCase() + person.firstName.toLowerCase();
-    }
-});
-
-Ext.define('Employee', {
-    extend: 'Ext.data.Model',
-    config: {
-        fields: [{
-            name: 'person',
-            sortType: 'asPerson'
-        }, {
-            name: 'salary',
-            type: 'float' // sortType set to asFloat
-        }]
-    }
-});
- * </code></pre>
- * </p>
- * @singleton
- * @docauthor Evan Trimboli <evan@sencha.com>
- */
-Ext.define('Ext.data.SortTypes', {
-    singleton: true,
-
-    /**
-     * The regular expression used to strip tags
-     * @type {RegExp}
-     * @property
-     */
-    stripTagsRE : /<\/?[^>]+>/gi,
-
-    /**
-     * Default sort that does nothing
-     * @param {Object} value The value being converted
-     * @return {Object} The comparison value
-     */
-    none : function(value) {
-        return value;
-    },
-
-    /**
-     * Strips all HTML tags to sort on text only
-     * @param {Object} value The value being converted
-     * @return {String} The comparison value
-     */
-    asText : function(value) {
-        return String(value).replace(this.stripTagsRE, "");
-    },
-
-    /**
-     * Strips all HTML tags to sort on text only - Case insensitive
-     * @param {Object} value The value being converted
-     * @return {String} The comparison value
-     */
-    asUCText : function(value) {
-        return String(value).toUpperCase().replace(this.stripTagsRE, "");
-    },
-
-    /**
-     * Case insensitive string
-     * @param {Object} value The value being converted
-     * @return {String} The comparison value
-     */
-    asUCString : function(value) {
-        return String(value).toUpperCase();
-    },
-
-    /**
-     * Date sorting
-     * @param {Object} value The value being converted
-     * @return {Number} The comparison value
-     */
-    asDate : function(value) {
-        if (!value) {
-            return 0;
-        }
-        if (Ext.isDate(value)) {
-            return value.getTime();
-        }
-        return Date.parse(String(value));
-    },
-
-    /**
-     * Float sorting
-     * @param {Object} value The value being converted
-     * @return {Number} The comparison value
-     */
-    asFloat : function(value) {
-        value = parseFloat(String(value).replace(/,/g, ""));
-        return isNaN(value) ? 0 : value;
-    },
-
-    /**
-     * Integer sorting
-     * @param {Object} value The value being converted
-     * @return {Number} The comparison value
-     */
-    asInt : function(value) {
-        value = parseInt(String(value).replace(/,/g, ""), 10);
-        return isNaN(value) ? 0 : value;
-    }
-});
-/**
- * @author Ed Spencer
- * @class Ext.data.Error
+ * @author Tommy Maintz
  *
- * <p>This is used when validating a record. The validate method will return an Ext.data.Errors collection
- * containing Ext.data.Error instances. Each error has a field and a message.</p>
+ * This class generates UUID's according to RFC 4122. This class has a default id property.
+ * This means that a single instance is shared unless the id property is overridden. Thus,
+ * two {@link Ext.data.Model} instances configured like the following share one generator:
  *
- * <p>Usually this class does not need to be instantiated directly - instances are instead created
- * automatically when {@link Ext.data.Model#validate validate} on a model instance.</p>
+ *     Ext.define('MyApp.data.MyModelX', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             identifier: 'uuid'
+ *         }
+ *     });
+ *
+ *     Ext.define('MyApp.data.MyModelY', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             identifier: 'uuid'
+ *         }
+ *     });
+ *
+ * This allows all models using this class to share a commonly configured instance.
+ *
+ * # Using Version 1 ("Sequential") UUID's
+ *
+ * If a server can provide a proper timestamp and a "cryptographic quality random number"
+ * (as described in RFC 4122), the shared instance can be configured as follows:
+ *
+ *     Ext.data.identifier.Uuid.Global.reconfigure({
+ *         version: 1,
+ *         clockSeq: clock, // 14 random bits
+ *         salt: salt,      // 48 secure random bits (the Node field)
+ *         timestamp: ts    // timestamp per Section 4.1.4
+ *     });
+ *
+ *     // or these values can be split into 32-bit chunks:
+ *
+ *     Ext.data.identifier.Uuid.Global.reconfigure({
+ *         version: 1,
+ *         clockSeq: clock,
+ *         salt: { lo: saltLow32, hi: saltHigh32 },
+ *         timestamp: { lo: timestampLow32, hi: timestamptHigh32 }
+ *     });
+ *
+ * This approach improves the generator's uniqueness by providing a valid timestamp and
+ * higher quality random data. Version 1 UUID's should not be used unless this information
+ * can be provided by a server and care should be taken to avoid caching of this data.
+ *
+ * See http://www.ietf.org/rfc/rfc4122.txt for details.
  */
+Ext.define('Ext.data.identifier.Uuid', {
+    extend: 'Ext.data.identifier.Simple',
 
-Ext.define('Ext.data.Error', {
+    alias: 'data.identifier.uuid',
+
+    isUnique: true,
+
     config: {
         /**
-         * @cfg {String} field
-         * The name of the field this error belongs to.
+         * The id for this generator instance. By default all model instances share the same
+         * UUID generator instance. By specifying an id other then 'uuid', a unique generator instance
+         * will be created for the Model.
          */
-        field: null,
+        id: undefined,
 
         /**
-         * @cfg {String} message
-         * The message containing the description of the error.
+         * @property {Number/Object} salt
+         * When created, this value is a 48-bit number. For computation, this value is split
+         * into 32-bit parts and stored in an object with `hi` and `lo` properties.
          */
-        message: ''
+        salt: null,
+
+        /**
+         * @property {Number/Object} timestamp
+         * When created, this value is a 60-bit number. For computation, this value is split
+         * into 32-bit parts and stored in an object with `hi` and `lo` properties.
+         */
+        timestamp: null,
+
+        /**
+         * @cfg {Number} version
+         * The Version of UUID. Supported values are:
+         *
+         *  * 1 : Time-based, "sequential" UUID.
+         *  * 4 : Pseudo-random UUID.
+         *
+         * The default is 4.
+         */
+        version: 4
     },
 
-    constructor: function(config) {
-        this.initConfig(config);
-    }
-});
+    applyId: function(id) {
+        if (id === undefined) {
+            return Ext.data.identifier.Uuid.Global;
+        }
+        return id;
+    },
 
+    constructor: function() {
+        var me = this;
+        me.callParent(arguments);
+        me.parts = [];
+        me.init();
+    },
+
+    /**
+     * Reconfigures this generator given new config properties.
+     */
+    reconfigure: function(config) {
+        this.setConfig(config);
+        this.init();
+    },
+
+    generate: function () {
+        var me = this,
+            parts = me.parts,
+            version = me.getVersion(),
+            salt = me.getSalt(),
+            time = me.getTimestamp();
+
+        /*
+           The magic decoder ring (derived from RFC 4122 Section 4.2.2):
+
+           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+           |                          time_low                             |
+           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+           |           time_mid            |  ver  |        time_hi        |
+           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+           |res|  clock_hi |   clock_low   |    salt 0   |M|     salt 1    |
+           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+           |                         salt (2-5)                            |
+           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                     time_mid      clock_hi (low 6 bits)
+            time_low     | time_hi |clock_lo
+                |        |     |   || salt[0]
+                |        |     |   ||   | salt[1..5]
+                v        v     v   vv   v v
+                0badf00d-aced-1def-b123-dfad0badbeef
+                              ^    ^     ^
+                        version    |     multicast (low bit)
+                                   |
+                                reserved (upper 2 bits)
+        */
+        parts[0] = me.toHex(time.lo, 8);
+        parts[1] = me.toHex(time.hi & 0xFFFF, 4);
+        parts[2] = me.toHex(((time.hi >>> 16) & 0xFFF) | (version << 12), 4);
+        parts[3] = me.toHex(0x80 | ((me.clockSeq >>> 8) & 0x3F), 2) +
+                   me.toHex(me.clockSeq & 0xFF, 2);
+        parts[4] = me.toHex(salt.hi, 4) + me.toHex(salt.lo, 8);
+
+        if (version == 4) {
+            me.init(); // just regenerate all the random values...
+        } else {
+            // sequentially increment the timestamp...
+            ++time.lo;
+            if (time.lo >= me.twoPow32) { // if (overflow)
+                time.lo = 0;
+                ++time.hi;
+            }
+        }
+
+        return parts.join('-').toLowerCase();
+    },
+
+    /**
+     * @private
+     */
+    init: function () {
+        var me = this,
+            salt = me.getSalt(),
+            time = me.getTimestamp();
+
+        if (me.getVersion() == 4) {
+            // See RFC 4122 (Secion 4.4)
+            //   o  If the state was unavailable (e.g., non-existent or corrupted),
+            //      or the saved node ID is different than the current node ID,
+            //      generate a random clock sequence value.
+            me.clockSeq = me.rand(0, me.twoPow14-1);
+
+            if (!salt) {
+                salt = {};
+                me.setSalt(salt);
+            }
+
+            if (!time) {
+                time = {};
+                me.setTimestamp(time);
+            }
+
+            // See RFC 4122 (Secion 4.4)
+            salt.lo = me.rand(0, me.twoPow32-1);
+            salt.hi = me.rand(0, me.twoPow16-1);
+            time.lo = me.rand(0, me.twoPow32-1);
+            time.hi = me.rand(0, me.twoPow28-1);
+        } else {
+            // this is run only once per-instance
+            me.setSalt(me.split(me.getSalt()));
+            me.setTimestamp(me.split(me.getTimestamp()));
+
+            // Set multicast bit: "the least significant bit of the first octet of the
+            // node ID" (nodeId = salt for this implementation):
+            me.getSalt().hi |= 0x100;
+        }
+    },
+
+    /**
+     * Some private values used in methods on this class.
+     * @private
+     */
+    twoPow14: Math.pow(2, 14),
+    twoPow16: Math.pow(2, 16),
+    twoPow28: Math.pow(2, 28),
+    twoPow32: Math.pow(2, 32),
+
+    /**
+     * Converts a value into a hexadecimal value. Also allows for a maximum length
+     * of the returned value.
+     * @param value
+     * @param length
+     * @private
+     */
+    toHex: function(value, length) {
+        var ret = value.toString(16);
+        if (ret.length > length) {
+            ret = ret.substring(ret.length - length); // right-most digits
+        } else if (ret.length < length) {
+            ret = Ext.String.leftPad(ret, length, '0');
+        }
+        return ret;
+    },
+
+    /**
+     * Generates a random value with between a low and high.
+     * @param lo
+     * @param hi
+     * @private
+     */
+    rand: function(lo, hi) {
+        var v = Math.random() * (hi - lo + 1);
+        return Math.floor(v) + lo;
+    },
+
+    /**
+     * Splits a number into a low and high value.
+     * @param bignum
+     * @private
+     */
+    split: function(bignum) {
+        if (typeof(bignum) == 'number') {
+            var hi = Math.floor(bignum / this.twoPow32);
+            return {
+                lo: Math.floor(bignum - hi * this.twoPow32),
+                hi: hi
+            };
+        }
+        return bignum;
+    }
+}, function() {
+    this.Global = new this({
+        id: 'uuid'
+    });
+});
 /**
  * <p>General purpose inflector class that {@link #pluralize pluralizes}, {@link #singularize singularizes} and 
  * {@link #ordinalize ordinalizes} words. Sample usage:</p>
@@ -27659,6 +28109,163 @@ Ext.define('Ext.util.Inflector', {
     }
 });
 /**
+ * @class Ext.data.SortTypes
+ * This class defines a series of static methods that are used on a
+ * {@link Ext.data.Field} for performing sorting. The methods cast the
+ * underlying values into a data type that is appropriate for sorting on
+ * that particular field.  If a {@link Ext.data.Field#type} is specified,
+ * the sortType will be set to a sane default if the sortType is not
+ * explicitly defined on the field. The sortType will make any necessary
+ * modifications to the value and return it.
+ * <ul>
+ * <li><b>asText</b> - Removes any tags and converts the value to a string</li>
+ * <li><b>asUCText</b> - Removes any tags and converts the value to an uppercase string</li>
+ * <li><b>asUCText</b> - Converts the value to an uppercase string</li>
+ * <li><b>asDate</b> - Converts the value into Unix epoch time</li>
+ * <li><b>asFloat</b> - Converts the value to a floating point number</li>
+ * <li><b>asInt</b> - Converts the value to an integer number</li>
+ * </ul>
+ * <p>
+ * It is also possible to create a custom sortType that can be used throughout
+ * an application.
+ * <pre><code>
+Ext.apply(Ext.data.SortTypes, {
+    asPerson: function(person){
+        // expects an object with a first and last name property
+        return person.lastName.toUpperCase() + person.firstName.toLowerCase();
+    }
+});
+
+Ext.define('Employee', {
+    extend: 'Ext.data.Model',
+    config: {
+        fields: [{
+            name: 'person',
+            sortType: 'asPerson'
+        }, {
+            name: 'salary',
+            type: 'float' // sortType set to asFloat
+        }]
+    }
+});
+ * </code></pre>
+ * </p>
+ * @singleton
+ * @docauthor Evan Trimboli <evan@sencha.com>
+ */
+Ext.define('Ext.data.SortTypes', {
+    singleton: true,
+
+    /**
+     * The regular expression used to strip tags
+     * @type {RegExp}
+     * @property
+     */
+    stripTagsRE : /<\/?[^>]+>/gi,
+
+    /**
+     * Default sort that does nothing
+     * @param {Object} value The value being converted
+     * @return {Object} The comparison value
+     */
+    none : function(value) {
+        return value;
+    },
+
+    /**
+     * Strips all HTML tags to sort on text only
+     * @param {Object} value The value being converted
+     * @return {String} The comparison value
+     */
+    asText : function(value) {
+        return String(value).replace(this.stripTagsRE, "");
+    },
+
+    /**
+     * Strips all HTML tags to sort on text only - Case insensitive
+     * @param {Object} value The value being converted
+     * @return {String} The comparison value
+     */
+    asUCText : function(value) {
+        return String(value).toUpperCase().replace(this.stripTagsRE, "");
+    },
+
+    /**
+     * Case insensitive string
+     * @param {Object} value The value being converted
+     * @return {String} The comparison value
+     */
+    asUCString : function(value) {
+        return String(value).toUpperCase();
+    },
+
+    /**
+     * Date sorting
+     * @param {Object} value The value being converted
+     * @return {Number} The comparison value
+     */
+    asDate : function(value) {
+        if (!value) {
+            return 0;
+        }
+        if (Ext.isDate(value)) {
+            return value.getTime();
+        }
+        return Date.parse(String(value));
+    },
+
+    /**
+     * Float sorting
+     * @param {Object} value The value being converted
+     * @return {Number} The comparison value
+     */
+    asFloat : function(value) {
+        value = parseFloat(String(value).replace(/,/g, ""));
+        return isNaN(value) ? 0 : value;
+    },
+
+    /**
+     * Integer sorting
+     * @param {Object} value The value being converted
+     * @return {Number} The comparison value
+     */
+    asInt : function(value) {
+        value = parseInt(String(value).replace(/,/g, ""), 10);
+        return isNaN(value) ? 0 : value;
+    }
+});
+/**
+ * @author Ed Spencer
+ * @class Ext.data.Error
+ *
+ * <p>This is used when validating a record. The validate method will return an Ext.data.Errors collection
+ * containing Ext.data.Error instances. Each error has a field and a message.</p>
+ *
+ * <p>Usually this class does not need to be instantiated directly - instances are instead created
+ * automatically when {@link Ext.data.Model#validate validate} on a model instance.</p>
+ */
+
+Ext.define('Ext.data.Error', {
+    config: {
+        /**
+         * @cfg {String} field
+         * The name of the field this error belongs to.
+         */
+        field: null,
+
+        /**
+         * @cfg {String} message
+         * The message containing the description of the error.
+         */
+        message: ''
+    },
+
+    constructor: function(config) {
+        this.initConfig(config);
+    }
+});
+
+/**
  * @author Ed Spencer
  * @class Ext.data.Batch
  *
@@ -27838,8 +28445,333 @@ Ext.define('Ext.data.Batch', {
 
             operation.setStarted();
 
+
             me.getProxy()[operation.getAction()](operation, onProxyReturn, me);
         }
+    }
+});
+/**
+Represents a collection of a set of key and value pairs. Each key in the HashMap must be unique, the same
+key cannot exist twice. Access to items is provided via the key only. Sample usage:
+
+    var map = Ext.create('Ext.util.HashMap');
+    map.add('key1', 1);
+    map.add('key2', 2);
+    map.add('key3', 3);
+
+    map.each(function(key, value, length){
+        console.log(key, value, length);
+    });
+
+The HashMap is an unordered class, there is no guarantee when iterating over the items that they will be in
+any particular order. If this is required, then use a {@link Ext.util.MixedCollection}.
+
+ */
+Ext.define('Ext.util.HashMap', {
+    mixins: {
+        observable: 'Ext.mixin.Observable'
+    },
+
+    /**
+     * @cfg {Function} keyFn
+     * A function that is used to retrieve a default key for a passed object.
+     * A default is provided that returns the **id** property on the object.
+     * This function is only used if the add method is called with a single argument.
+     */
+
+    /**
+     * Creates new HashMap.
+     * @param {Object} config The configuration options
+     */
+    constructor: function(config) {
+        /**
+         * @event add
+         * Fires when a new item is added to the hash
+         * @param {Ext.util.HashMap} this.
+         * @param {String} key The key of the added item.
+         * @param {Object} value The value of the added item.
+         */
+        /**
+         * @event clear
+         * Fires when the hash is cleared.
+         * @param {Ext.util.HashMap} this.
+         */
+        /**
+         * @event remove
+         * Fires when an item is removed from the hash.
+         * @param {Ext.util.HashMap} this.
+         * @param {String} key The key of the removed item.
+         * @param {Object} value The value of the removed item.
+         */
+        /**
+         * @event replace
+         * Fires when an item is replaced in the hash.
+         * @param {Ext.util.HashMap} this.
+         * @param {String} key The key of the replaced item.
+         * @param {Object} value The new value for the item.
+         * @param {Object} old The old value for the item.
+         */
+
+        this.callParent();
+
+        this.mixins.observable.constructor.call(this);
+
+        this.clear(true);
+    },
+
+    /**
+     * Gets the number of items in the hash.
+     * @return {Number} The number of items in the hash.
+     */
+    getCount: function() {
+        return this.length;
+    },
+
+    /**
+     * Implementation for being able to extract the key from an object if only
+     * a single argument is passed.
+     * @private
+     * @param {String} key The key
+     * @param {Object} value The value
+     * @return {Array} [key, value]
+     */
+    getData: function(key, value) {
+        // if we have no value, it means we need to get the key from the object
+        if (value === undefined) {
+            value = key;
+            key = this.getKey(value);
+        }
+
+        return [key, value];
+    },
+
+    /**
+     * Extracts the key from an object. This is a default implementation, it may be overridden
+     * @private
+     * @param {Object} o The object to get the key from
+     * @return {String} The key to use.
+     */
+    getKey: function(o) {
+        return o.id;
+    },
+
+    /**
+     * Add a new item to the hash. An exception will be thrown if the key already exists.
+     * @param {String} key The key of the new item.
+     * @param {Object} value The value of the new item.
+     * @return {Object} The value of the new item added.
+     */
+    add: function(key, value) {
+        var me = this,
+            data;
+
+        if (me.containsKey(key)) {
+            throw new Error('This key already exists in the HashMap');
+        }
+
+        data = this.getData(key, value);
+        key = data[0];
+        value = data[1];
+        me.map[key] = value;
+        ++me.length;
+        me.fireEvent('add', me, key, value);
+        return value;
+    },
+
+    /**
+     * Replaces an item in the hash. If the key doesn't exist, the
+     * {@link #method-add} method will be used.
+     * @param {String} key The key of the item.
+     * @param {Object} value The new value for the item.
+     * @return {Object} The new value of the item.
+     */
+    replace: function(key, value) {
+        var me = this,
+            map = me.map,
+            old;
+
+        if (!me.containsKey(key)) {
+            me.add(key, value);
+        }
+        old = map[key];
+        map[key] = value;
+        me.fireEvent('replace', me, key, value, old);
+        return value;
+    },
+
+    /**
+     * Remove an item from the hash.
+     * @param {Object} o The value of the item to remove.
+     * @return {Boolean} True if the item was successfully removed.
+     */
+    remove: function(o) {
+        var key = this.findKey(o);
+        if (key !== undefined) {
+            return this.removeByKey(key);
+        }
+        return false;
+    },
+
+    /**
+     * Remove an item from the hash.
+     * @param {String} key The key to remove.
+     * @return {Boolean} True if the item was successfully removed.
+     */
+    removeByKey: function(key) {
+        var me = this,
+            value;
+
+        if (me.containsKey(key)) {
+            value = me.map[key];
+            delete me.map[key];
+            --me.length;
+            me.fireEvent('remove', me, key, value);
+            return true;
+        }
+        return false;
+    },
+
+    /**
+     * Retrieves an item with a particular key.
+     * @param {String} key The key to lookup.
+     * @return {Object} The value at that key. If it doesn't exist, <tt>undefined</tt> is returned.
+     */
+    get: function(key) {
+        return this.map[key];
+    },
+
+    /**
+     * Removes all items from the hash.
+     * @return {Ext.util.HashMap} this
+     */
+    clear: function(/* private */ initial) {
+        var me = this;
+        me.map = {};
+        me.length = 0;
+        if (initial !== true) {
+            me.fireEvent('clear', me);
+        }
+        return me;
+    },
+
+    /**
+     * Checks whether a key exists in the hash.
+     * @param {String} key The key to check for.
+     * @return {Boolean} True if they key exists in the hash.
+     */
+    containsKey: function(key) {
+        return this.map[key] !== undefined;
+    },
+
+    /**
+     * Checks whether a value exists in the hash.
+     * @param {Object} value The value to check for.
+     * @return {Boolean} True if the value exists in the dictionary.
+     */
+    contains: function(value) {
+        return this.containsKey(this.findKey(value));
+    },
+
+    /**
+     * Return all of the keys in the hash.
+     * @return {Array} An array of keys.
+     */
+    getKeys: function() {
+        return this.getArray(true);
+    },
+
+    /**
+     * Return all of the values in the hash.
+     * @return {Array} An array of values.
+     */
+    getValues: function() {
+        return this.getArray(false);
+    },
+
+    /**
+     * Gets either the keys/values in an array from the hash.
+     * @private
+     * @param {Boolean} isKey True to extract the keys, otherwise, the value
+     * @return {Array} An array of either keys/values from the hash.
+     */
+    getArray: function(isKey) {
+        var arr = [],
+            key,
+            map = this.map;
+        for (key in map) {
+            if (map.hasOwnProperty(key)) {
+                arr.push(isKey ? key : map[key]);
+            }
+        }
+        return arr;
+    },
+
+    /**
+     * Executes the specified function once for each item in the hash.
+     * Returning false from the function will cease iteration.
+     *
+     * The paramaters passed to the function are:
+     * <div class="mdetail-params"><ul>
+     * <li><b>key</b> : String<p class="sub-desc">The key of the item</p></li>
+     * <li><b>value</b> : Number<p class="sub-desc">The value of the item</p></li>
+     * <li><b>length</b> : Number<p class="sub-desc">The total number of items in the hash</p></li>
+     * </ul></div>
+     * @param {Function} fn The function to execute.
+     * @param {Object} scope The scope to execute in. Defaults to <tt>this</tt>.
+     * @return {Ext.util.HashMap} this
+     */
+    each: function(fn, scope) {
+        // copy items so they may be removed during iteration.
+        var items = Ext.apply({}, this.map),
+            key,
+            length = this.length;
+
+        scope = scope || this;
+        for (key in items) {
+            if (items.hasOwnProperty(key)) {
+                if (fn.call(scope, key, items[key], length) === false) {
+                    break;
+                }
+            }
+        }
+        return this;
+    },
+
+    /**
+     * Performs a shallow copy on this hash.
+     * @return {Ext.util.HashMap} The new hash object.
+     */
+    clone: function() {
+        var hash = new Ext.util.HashMap(),
+            map = this.map,
+            key;
+
+        hash.suspendEvents();
+        for (key in map) {
+            if (map.hasOwnProperty(key)) {
+                hash.add(key, map[key]);
+            }
+        }
+        hash.resumeEvents();
+        return hash;
+    },
+
+    /**
+     * @private
+     * Find the key for a value.
+     * @param {Object} value The value to find.
+     * @return {Object} The value of the item. Returns <tt>undefined</tt> if not found.
+     */
+    findKey: function(value) {
+        var key,
+            map = this.map;
+
+        for (key in map) {
+            if (map.hasOwnProperty(key) && map[key] === value) {
+                return key;
+            }
+        }
+        return undefined;
     }
 });
 /**
@@ -27933,6 +28865,22 @@ Ext.define('Ext.data.Request', {
          * This field is necessary when using cross-origin resource sharing.
          */
         withCredentials: null,
+
+        /**
+         * @cfg {String} username
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the username.
+         * @accessor
+         */
+        username: null,
+
+        /**
+         * @cfg {String} password
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the password.
+         * @accessor
+         */
+        password: null,
 
         callback: null,
         scope: null,
@@ -28156,7 +29104,7 @@ Ext.define('Ext.data.Connection', {
      * @param {Object} options.success.response The XMLHttpRequest object containing the response data.
      * @param {Object} options.success.options The parameter to the request call.
      *
-     * @param {Function} options.failure The function to be called upon success of the request.
+     * @param {Function} options.failure The function to be called upon failure of the request.
      * The callback is passed the following parameters:
      * @param {Object} options.failure.response The XMLHttpRequest object containing the response data.
      * @param {Object} options.failure.options The parameter to the request call.
@@ -28248,7 +29196,7 @@ Ext.define('Ext.data.Connection', {
 
             // create the transaction object
             request = {
-                id: ++this.self.requestId,
+                id: ++Ext.data.Connection.requestId,
                 xhr: xhr,
                 headers: headers,
                 options: options,
@@ -28861,330 +29809,6 @@ Ext.define('Ext.data.Connection', {
 });
 
 /**
-Represents a collection of a set of key and value pairs. Each key in the HashMap must be unique, the same
-key cannot exist twice. Access to items is provided via the key only. Sample usage:
-
-    var map = Ext.create('Ext.util.HashMap');
-    map.add('key1', 1);
-    map.add('key2', 2);
-    map.add('key3', 3);
-
-    map.each(function(key, value, length){
-        console.log(key, value, length);
-    });
-
-The HashMap is an unordered class, there is no guarantee when iterating over the items that they will be in
-any particular order. If this is required, then use a {@link Ext.util.MixedCollection}.
-
- */
-Ext.define('Ext.util.HashMap', {
-    mixins: {
-        observable: 'Ext.mixin.Observable'
-    },
-
-    /**
-     * @cfg {Function} keyFn
-     * A function that is used to retrieve a default key for a passed object.
-     * A default is provided that returns the **id** property on the object.
-     * This function is only used if the add method is called with a single argument.
-     */
-
-    /**
-     * Creates new HashMap.
-     * @param {Object} config The configuration options
-     */
-    constructor: function(config) {
-        /**
-         * @event add
-         * Fires when a new item is added to the hash
-         * @param {Ext.util.HashMap} this.
-         * @param {String} key The key of the added item.
-         * @param {Object} value The value of the added item.
-         */
-        /**
-         * @event clear
-         * Fires when the hash is cleared.
-         * @param {Ext.util.HashMap} this.
-         */
-        /**
-         * @event remove
-         * Fires when an item is removed from the hash.
-         * @param {Ext.util.HashMap} this.
-         * @param {String} key The key of the removed item.
-         * @param {Object} value The value of the removed item.
-         */
-        /**
-         * @event replace
-         * Fires when an item is replaced in the hash.
-         * @param {Ext.util.HashMap} this.
-         * @param {String} key The key of the replaced item.
-         * @param {Object} value The new value for the item.
-         * @param {Object} old The old value for the item.
-         */
-
-        this.callParent();
-
-        this.mixins.observable.constructor.call(this);
-
-        this.clear(true);
-    },
-
-    /**
-     * Gets the number of items in the hash.
-     * @return {Number} The number of items in the hash.
-     */
-    getCount: function() {
-        return this.length;
-    },
-
-    /**
-     * Implementation for being able to extract the key from an object if only
-     * a single argument is passed.
-     * @private
-     * @param {String} key The key
-     * @param {Object} value The value
-     * @return {Array} [key, value]
-     */
-    getData: function(key, value) {
-        // if we have no value, it means we need to get the key from the object
-        if (value === undefined) {
-            value = key;
-            key = this.getKey(value);
-        }
-
-        return [key, value];
-    },
-
-    /**
-     * Extracts the key from an object. This is a default implementation, it may be overridden
-     * @private
-     * @param {Object} o The object to get the key from
-     * @return {String} The key to use.
-     */
-    getKey: function(o) {
-        return o.id;
-    },
-
-    /**
-     * Add a new item to the hash. An exception will be thrown if the key already exists.
-     * @param {String} key The key of the new item.
-     * @param {Object} value The value of the new item.
-     * @return {Object} The value of the new item added.
-     */
-    add: function(key, value) {
-        var me = this,
-            data;
-
-        if (me.containsKey(key)) {
-            throw new Error('This key already exists in the HashMap');
-        }
-
-        data = this.getData(key, value);
-        key = data[0];
-        value = data[1];
-        me.map[key] = value;
-        ++me.length;
-        me.fireEvent('add', me, key, value);
-        return value;
-    },
-
-    /**
-     * Replaces an item in the hash. If the key doesn't exist, the
-     * {@link #method-add} method will be used.
-     * @param {String} key The key of the item.
-     * @param {Object} value The new value for the item.
-     * @return {Object} The new value of the item.
-     */
-    replace: function(key, value) {
-        var me = this,
-            map = me.map,
-            old;
-
-        if (!me.containsKey(key)) {
-            me.add(key, value);
-        }
-        old = map[key];
-        map[key] = value;
-        me.fireEvent('replace', me, key, value, old);
-        return value;
-    },
-
-    /**
-     * Remove an item from the hash.
-     * @param {Object} o The value of the item to remove.
-     * @return {Boolean} True if the item was successfully removed.
-     */
-    remove: function(o) {
-        var key = this.findKey(o);
-        if (key !== undefined) {
-            return this.removeByKey(key);
-        }
-        return false;
-    },
-
-    /**
-     * Remove an item from the hash.
-     * @param {String} key The key to remove.
-     * @return {Boolean} True if the item was successfully removed.
-     */
-    removeByKey: function(key) {
-        var me = this,
-            value;
-
-        if (me.containsKey(key)) {
-            value = me.map[key];
-            delete me.map[key];
-            --me.length;
-            me.fireEvent('remove', me, key, value);
-            return true;
-        }
-        return false;
-    },
-
-    /**
-     * Retrieves an item with a particular key.
-     * @param {String} key The key to lookup.
-     * @return {Object} The value at that key. If it doesn't exist, <tt>undefined</tt> is returned.
-     */
-    get: function(key) {
-        return this.map[key];
-    },
-
-    /**
-     * Removes all items from the hash.
-     * @return {Ext.util.HashMap} this
-     */
-    clear: function(/* private */ initial) {
-        var me = this;
-        me.map = {};
-        me.length = 0;
-        if (initial !== true) {
-            me.fireEvent('clear', me);
-        }
-        return me;
-    },
-
-    /**
-     * Checks whether a key exists in the hash.
-     * @param {String} key The key to check for.
-     * @return {Boolean} True if they key exists in the hash.
-     */
-    containsKey: function(key) {
-        return this.map[key] !== undefined;
-    },
-
-    /**
-     * Checks whether a value exists in the hash.
-     * @param {Object} value The value to check for.
-     * @return {Boolean} True if the value exists in the dictionary.
-     */
-    contains: function(value) {
-        return this.containsKey(this.findKey(value));
-    },
-
-    /**
-     * Return all of the keys in the hash.
-     * @return {Array} An array of keys.
-     */
-    getKeys: function() {
-        return this.getArray(true);
-    },
-
-    /**
-     * Return all of the values in the hash.
-     * @return {Array} An array of values.
-     */
-    getValues: function() {
-        return this.getArray(false);
-    },
-
-    /**
-     * Gets either the keys/values in an array from the hash.
-     * @private
-     * @param {Boolean} isKey True to extract the keys, otherwise, the value
-     * @return {Array} An array of either keys/values from the hash.
-     */
-    getArray: function(isKey) {
-        var arr = [],
-            key,
-            map = this.map;
-        for (key in map) {
-            if (map.hasOwnProperty(key)) {
-                arr.push(isKey ? key : map[key]);
-            }
-        }
-        return arr;
-    },
-
-    /**
-     * Executes the specified function once for each item in the hash.
-     * Returning false from the function will cease iteration.
-     *
-     * The paramaters passed to the function are:
-     * <div class="mdetail-params"><ul>
-     * <li><b>key</b> : String<p class="sub-desc">The key of the item</p></li>
-     * <li><b>value</b> : Number<p class="sub-desc">The value of the item</p></li>
-     * <li><b>length</b> : Number<p class="sub-desc">The total number of items in the hash</p></li>
-     * </ul></div>
-     * @param {Function} fn The function to execute.
-     * @param {Object} scope The scope to execute in. Defaults to <tt>this</tt>.
-     * @return {Ext.util.HashMap} this
-     */
-    each: function(fn, scope) {
-        // copy items so they may be removed during iteration.
-        var items = Ext.apply({}, this.map),
-            key,
-            length = this.length;
-
-        scope = scope || this;
-        for (key in items) {
-            if (items.hasOwnProperty(key)) {
-                if (fn.call(scope, key, items[key], length) === false) {
-                    break;
-                }
-            }
-        }
-        return this;
-    },
-
-    /**
-     * Performs a shallow copy on this hash.
-     * @return {Ext.util.HashMap} The new hash object.
-     */
-    clone: function() {
-        var hash = new Ext.util.HashMap(),
-            map = this.map,
-            key;
-
-        hash.suspendEvents();
-        for (key in map) {
-            if (map.hasOwnProperty(key)) {
-                hash.add(key, map[key]);
-            }
-        }
-        hash.resumeEvents();
-        return hash;
-    },
-
-    /**
-     * @private
-     * Find the key for a value.
-     * @param {Object} value The value to find.
-     * @return {Object} The value of the item. Returns <tt>undefined</tt> if not found.
-     */
-    findKey: function(value) {
-        var key,
-            map = this.map;
-
-        for (key in map) {
-            if (map.hasOwnProperty(key) && map[key] === value) {
-                return key;
-            }
-        }
-        return undefined;
-    }
-});
-/**
  * @author Ed Spencer
  *
  * Base Writer class used by most subclasses of {@link Ext.data.proxy.Server}. This class is
@@ -29271,7 +29895,7 @@ Ext.define('Ext.data.writer.Writer', {
     },
 
     writeDate: function(field, date) {
-        var dateFormat = field.dateFormat || 'timestamp';
+        var dateFormat = field.getDateFormat() || 'timestamp';
         switch (dateFormat) {
             case 'timestamp':
                 return date.getTime()/1000;
@@ -29646,6 +30270,2039 @@ Ext.define('Ext.Toolbar', {
      */
 
 }, function() {
+});
+
+
+/**
+ * @private
+ */
+Ext.define('Ext.field.TextAreaInput', {
+    extend: 'Ext.field.Input',
+    xtype : 'textareainput',
+
+    tag: 'textarea'
+});
+
+/**
+ * @aside guide floating_components
+ *
+ * Panels are most useful as Overlays - containers that float over your application. They contain extra styling such
+ * that when you {@link #showBy} another component, the container will appear in a rounded black box with a 'tip'
+ * pointing to a reference component.
+ *
+ * If you don't need this extra functionality, you should use {@link Ext.Container} instead. See the
+ * [Overlays example](#!/example/overlays) for more use cases.
+ *
+ *      @example miniphone preview
+ *
+ *      var button = Ext.create('Ext.Button', {
+ *           text: 'Button',
+ *           id: 'rightButton'
+ *      });
+ *
+ *      Ext.create('Ext.Container', {
+ *          fullscreen: true,
+ *          items: [
+ *              {
+ *                   docked: 'top',
+ *                   xtype: 'titlebar',
+ *                   items: [
+ *                       button
+ *                   ]
+ *               }
+ *          ]
+ *      });
+ *
+ *      Ext.create('Ext.Panel', {
+ *          html: 'Floating Panel',
+ *          left: 0,
+ *          padding: 10
+ *      }).showBy(button);
+ *
+ */
+Ext.define('Ext.Panel', {
+    extend: 'Ext.Container',
+    requires: ['Ext.util.LineSegment'],
+
+    alternateClassName: 'Ext.lib.Panel',
+
+    xtype: 'panel',
+
+    isPanel: true,
+
+    config: {
+        baseCls: Ext.baseCSSPrefix + 'panel',
+
+        /**
+         * @cfg {Number/Boolean/String} bodyPadding
+         * A shortcut for setting a padding style on the body element. The value can either be
+         * a number to be applied to all sides, or a normal css string describing padding.
+         * @deprecated 2.0.0
+         */
+        bodyPadding: null,
+
+        /**
+         * @cfg {Number/Boolean/String} bodyMargin
+         * A shortcut for setting a margin style on the body element. The value can either be
+         * a number to be applied to all sides, or a normal css string describing margins.
+         * @deprecated 2.0.0
+         */
+        bodyMargin: null,
+
+        /**
+         * @cfg {Number/Boolean/String} bodyBorder
+         * A shortcut for setting a border style on the body element. The value can either be
+         * a number to be applied to all sides, or a normal css string describing borders.
+         * @deprecated 2.0.0
+         */
+        bodyBorder: null
+    },
+
+    getElementConfig: function() {
+        var config = this.callParent();
+
+        config.children.push({
+            reference: 'tipElement',
+            className: 'x-anchor',
+            hidden: true
+        });
+
+        return config;
+    },
+
+    applyBodyPadding: function(bodyPadding) {
+        if (bodyPadding === true) {
+            bodyPadding = 5;
+        }
+
+        if (bodyPadding) {
+            bodyPadding = Ext.dom.Element.unitizeBox(bodyPadding);
+        }
+
+        return bodyPadding;
+    },
+
+    updateBodyPadding: function(newBodyPadding) {
+        this.element.setStyle('padding', newBodyPadding);
+    },
+
+    applyBodyMargin: function(bodyMargin) {
+        if (bodyMargin === true) {
+            bodyMargin = 5;
+        }
+
+        if (bodyMargin) {
+            bodyMargin = Ext.dom.Element.unitizeBox(bodyMargin);
+        }
+
+        return bodyMargin;
+    },
+
+    updateBodyMargin: function(newBodyMargin) {
+        this.element.setStyle('margin', newBodyMargin);
+    },
+
+    applyBodyBorder: function(bodyBorder) {
+        if (bodyBorder === true) {
+            bodyBorder = 1;
+        }
+
+        if (bodyBorder) {
+            bodyBorder = Ext.dom.Element.unitizeBox(bodyBorder);
+        }
+
+        return bodyBorder;
+    },
+
+    updateBodyBorder: function(newBodyBorder) {
+        this.element.setStyle('border-width', newBodyBorder);
+    },
+
+    alignTo: function(component) {
+        var tipElement = this.tipElement;
+
+        tipElement.hide();
+
+        if (this.currentTipPosition) {
+            tipElement.removeCls('x-anchor-' + this.currentTipPosition);
+        }
+
+        this.callParent(arguments);
+
+        var LineSegment = Ext.util.LineSegment,
+            alignToElement = component.isComponent ? component.renderElement : component,
+            element = this.renderElement,
+            alignToBox = alignToElement.getPageBox(),
+            box = element.getPageBox(),
+            left = box.left,
+            top = box.top,
+            right = box.right,
+            bottom = box.bottom,
+            centerX = left + (box.width / 2),
+            centerY = top + (box.height / 2),
+            leftTopPoint = { x: left, y: top },
+            rightTopPoint = { x: right, y: top },
+            leftBottomPoint = { x: left, y: bottom },
+            rightBottomPoint = { x: right, y: bottom },
+            boxCenterPoint = { x: centerX, y: centerY },
+            alignToCenterX = alignToBox.left + (alignToBox.width / 2),
+            alignToCenterY = alignToBox.top + (alignToBox.height / 2),
+            alignToBoxCenterPoint = { x: alignToCenterX, y: alignToCenterY },
+            centerLineSegment = new LineSegment(boxCenterPoint, alignToBoxCenterPoint),
+            offsetLeft = 0,
+            offsetTop = 0,
+            tipSize, tipWidth, tipHeight, tipPosition, tipX, tipY;
+
+        tipElement.setVisibility(false);
+        tipElement.show();
+        tipSize = tipElement.getSize();
+        tipWidth = tipSize.width;
+        tipHeight = tipSize.height;
+
+        if (centerLineSegment.intersects(new LineSegment(leftTopPoint, rightTopPoint))) {
+            tipX = Math.min(Math.max(alignToCenterX, left + tipWidth), right - (tipWidth));
+            tipY = top;
+            offsetTop = tipHeight + 10;
+            tipPosition = 'top';
+        }
+        else if (centerLineSegment.intersects(new LineSegment(leftTopPoint, leftBottomPoint))) {
+            tipX = left;
+            tipY = Math.min(Math.max(alignToCenterY + (tipWidth / 2), tipWidth * 1.6), bottom - (tipWidth / 2.2));
+            offsetLeft = tipHeight + 10;
+            tipPosition = 'left';
+        }
+        else if (centerLineSegment.intersects(new LineSegment(leftBottomPoint, rightBottomPoint))) {
+            tipX = Math.min(Math.max(alignToCenterX, left + tipWidth), right - tipWidth);
+            tipY = bottom;
+            offsetTop = -tipHeight - 10;
+            tipPosition = 'bottom';
+        }
+        else if (centerLineSegment.intersects(new LineSegment(rightTopPoint, rightBottomPoint))) {
+            tipX = right;
+            tipY = Math.max(Math.min(alignToCenterY - tipHeight, bottom - tipWidth * 1.3), tipWidth / 2);
+            offsetLeft = -tipHeight - 10;
+            tipPosition = 'right';
+        }
+
+        if (tipX || tipY) {
+            this.currentTipPosition = tipPosition;
+            tipElement.addCls('x-anchor-' + tipPosition);
+            tipElement.setLeft(tipX - left);
+            tipElement.setTop(tipY - top);
+            tipElement.setVisibility(true);
+
+            this.setLeft(this.getLeft() + offsetLeft);
+            this.setTop(this.getTop() + offsetTop);
+        }
+    }
+});
+
+/**
+ * A general sheet class. This renderable container provides base support for orientation-aware transitions for popup or
+ * side-anchored sliding Panels.
+ *
+ * In most cases, you should use {@link Ext.ActionSheet}, {@link Ext.MessageBox}, {@link Ext.picker.Picker} or {@link Ext.picker.Date}.
+ */
+Ext.define('Ext.Sheet', {
+    extend: 'Ext.Panel',
+
+    xtype: 'sheet',
+
+    requires: ['Ext.fx.Animation'],
+
+    config: {
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        baseCls: Ext.baseCSSPrefix + 'sheet',
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        modal: true,
+
+        /**
+         * @cfg {Boolean} centered
+         * Whether or not this component is absolutely centered inside its container
+         * @accessor
+         * @evented
+         */
+        centered: true,
+
+        /**
+         * @cfg {Boolean} stretchX True to stretch this sheet horizontally.
+         */
+        stretchX: null,
+
+        /**
+         * @cfg {Boolean} stretchY True to stretch this sheet vertically.
+         */
+        stretchY: null,
+
+        /**
+         * @cfg {String} enter
+         * The viewport side used as the enter point when shown (top, bottom, left, right)
+         * Applies to sliding animation effects only. Defaults to 'bottom'
+         */
+        enter: 'bottom',
+
+        /**
+         * @cfg {String} exit
+         * The viewport side used as the exit point when hidden (top, bottom, left, right)
+         * Applies to sliding animation effects only. Defaults to 'bottom'
+         */
+        exit: 'bottom',
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        showAnimation: !Ext.os.is.Android2 ? {
+            type: 'slideIn',
+            duration: 250,
+            easing: 'ease-out'
+        } : null,
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        hideAnimation: !Ext.os.is.Android2 ? {
+            type: 'slideOut',
+            duration: 250,
+            easing: 'ease-in'
+        } : null
+    },
+
+    applyHideAnimation: function(config) {
+        var exit = this.getExit(),
+            direction = exit;
+
+        if (exit === null) {
+            return null;
+        }
+
+        if (config === true) {
+            config = {
+                type: 'slideOut'
+            };
+        }
+        if (Ext.isString(config)) {
+            config = {
+                type: config
+            };
+        }
+        var anim = Ext.factory(config, Ext.fx.Animation);
+
+        if (anim) {
+            if (exit == 'bottom') {
+                direction = 'down';
+            }
+            if (exit == 'top') {
+                direction = 'up';
+            }
+            anim.setDirection(direction);
+        }
+        return anim;
+    },
+
+    applyShowAnimation: function(config) {
+        var enter = this.getEnter(),
+            direction = enter;
+
+        if (enter === null) {
+            return null;
+        }
+
+        if (config === true) {
+            config = {
+                type: 'slideIn'
+            };
+        }
+        if (Ext.isString(config)) {
+            config = {
+                type: config
+            };
+        }
+        var anim = Ext.factory(config, Ext.fx.Animation);
+
+        if (anim) {
+            if (enter == 'bottom') {
+                direction = 'down';
+            }
+            if (enter == 'top') {
+                direction = 'up';
+            }
+            anim.setBefore({
+                display: null
+            });
+            anim.setReverse(true);
+            anim.setDirection(direction);
+        }
+        return anim;
+    },
+
+    updateStretchX: function(newStretchX) {
+        this.getLeft();
+        this.getRight();
+
+        if (newStretchX) {
+            this.setLeft(0);
+            this.setRight(0);
+        }
+    },
+
+    updateStretchY: function(newStretchY) {
+        this.getTop();
+        this.getBottom();
+
+        if (newStretchY) {
+            this.setTop(0);
+            this.setBottom(0);
+        }
+    }
+});
+
+/**
+ * @aside guide forms
+ *
+ * Field is the base class for all form fields used in Sencha Touch. It provides a lot of shared functionality to all
+ * field subclasses (for example labels, simple validation, {@link #clearIcon clearing} and tab index management), but
+ * is rarely used directly. Instead, it is much more common to use one of the field subclasses:
+ *
+ *     xtype            Class
+ *     ---------------------------------------
+ *     textfield        {@link Ext.field.Text}
+ *     numberfield      {@link Ext.field.Number}
+ *     textareafield    {@link Ext.field.TextArea}
+ *     hiddenfield      {@link Ext.field.Hidden}
+ *     radiofield       {@link Ext.field.Radio}
+ *     checkboxfield    {@link Ext.field.Checkbox}
+ *     selectfield      {@link Ext.field.Select}
+ *     togglefield      {@link Ext.field.Toggle}
+ *     fieldset         {@link Ext.form.FieldSet}
+ *
+ * Fields are normally used within the context of a form and/or fieldset. See the {@link Ext.form.Panel FormPanel}
+ * and {@link Ext.form.FieldSet FieldSet} docs for examples on how to put those together, or the list of links above
+ * for usage of individual field types. If you wish to create your own Field subclasses you can extend this class,
+ * though it is sometimes more useful to extend {@link Ext.field.Text} as this provides additional text entry
+ * functionality.
+ */
+Ext.define('Ext.field.Field', {
+    extend: 'Ext.Decorator',
+    alternateClassName: 'Ext.form.Field',
+    xtype: 'field',
+    requires: [
+        'Ext.field.Input'
+    ],
+
+    /**
+     * Set to true on all Ext.field.Field subclasses. This is used by {@link Ext.form.Panel#getValues} to determine which
+     * components inside a form are fields.
+     * @property isField
+     * @type Boolean
+     */
+    isField: true,
+
+    // @private
+    isFormField: true,
+
+    config: {
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        baseCls: Ext.baseCSSPrefix + 'field',
+
+        /**
+         * The label of this field
+         * @cfg {String} label
+         * @accessor
+         */
+        label: null,
+
+        /**
+         * @cfg {String} labelAlign The position to render the label relative to the field input.
+         * Available options are: 'top', 'left', 'bottom' and 'right'
+         * Defaults to 'left'
+         * @accessor
+         */
+        labelAlign: 'left',
+
+        /**
+         * @cfg {Number/String} labelWidth The width to make this field's label.
+         * @accessor
+         */
+        labelWidth: '30%',
+
+        /**
+         * @cfg {Boolean} labelWrap True to allow the label to wrap. If set to false, the label will be truncated with
+         * an ellipsis.
+         * @accessor
+         */
+        labelWrap: false,
+
+        /**
+         * @cfg {Boolean} clearIcon True to use a clear icon in this field
+         * @accessor
+         */
+        clearIcon: null,
+
+        /**
+         * @cfg {Boolean} required True to make this field required. Note: this only causes a visual indication.
+         * Doesn't prevent user from submitting the form.
+         * @accessor
+         */
+        required: false,
+
+        /**
+         * <p>The label Element associated with this Field. <b>Only available if a {@link #label} is specified.</b></p>
+<p>This has been deprecated.
+         * @type Ext.Element
+         * @property labelEl
+         * @deprecated 2.0
+         */
+
+        /**
+         * @cfg {String} inputType The type attribute for input fields -- e.g. radio, text, password, file (defaults
+         * to 'text'). The types 'file' and 'password' must be used to render those field types currently -- there are
+         * no separate Ext components for those.
+         * This is now deprecated. Please use 'input.type' instead.
+         * @deprecated 2.0
+         * @accessor
+         */
+        inputType: null,
+
+        /**
+         * @cfg {String} name The field's HTML name attribute.
+         * <b>Note</b>: this property must be set if this field is to be automatically included with
+         * {@link Ext.form.Panel#method-submit form submit()}.
+         * @accessor
+         */
+        name: null,
+
+        /**
+         * @cfg {Mixed} value A value to initialize this field with.
+         * @accessor
+         */
+        value: null,
+
+        /**
+         * @cfg {Number} tabIndex The tabIndex for this field. Note this only applies to fields that are rendered,
+         * not those which are built via applyTo.
+         * @accessor
+         */
+        tabIndex: null
+
+        /**
+         * @cfg {Object} component The inner component for this field.
+         */
+
+        /**
+         * @cfg {Boolean} fullscreen
+         * @hide
+         */
+    },
+
+    cachedConfig: {
+        /**
+         * @cfg {String} labelCls Optional CSS class to add to the Label element
+         * @accessor
+         */
+        labelCls: null,
+
+        /**
+         * @cfg {String} requiredCls The className to be applied to this Field when the {@link #required} configuration is set to true
+         * @accessor
+         */
+        requiredCls: Ext.baseCSSPrefix + 'field-required',
+
+        /**
+         * @cfg {String} inputCls CSS class to add to the input element of this fields {@link #component}
+         */
+        inputCls: null,
+
+        bubbleEvents: ['action']
+    },
+
+    /**
+     * @cfg {Boolean} isFocused
+     * True if this field is currently focused,
+     * @private
+     */
+
+    getElementConfig: function() {
+        var prefix = Ext.baseCSSPrefix;
+
+        return {
+            reference: 'element',
+            className: 'x-container',
+            children: [
+                {
+                    reference: 'label',
+                    cls: prefix + 'form-label',
+                    children: [{
+                        reference: 'labelspan',
+                        tag: 'span'
+                    }]
+                },
+                {
+                    reference: 'innerElement',
+                    cls: prefix + 'component-outer'
+                }
+            ]
+        };
+    },
+
+    // @private
+    updateLabel: function(newLabel, oldLabel) {
+        var renderElement = this.renderElement,
+            prefix = Ext.baseCSSPrefix;
+
+        if (newLabel) {
+            this.labelspan.setHtml(newLabel);
+            renderElement.addCls(prefix + 'field-labeled');
+        } else {
+            renderElement.removeCls(prefix + 'field-labeled');
+        }
+    },
+
+    // @private
+    updateLabelAlign: function(newLabelAlign, oldLabelAlign) {
+        var renderElement = this.renderElement,
+            prefix = Ext.baseCSSPrefix;
+
+        if (newLabelAlign) {
+            renderElement.addCls(prefix + 'label-align-' + newLabelAlign);
+
+            if (newLabelAlign == "top" || newLabelAlign == "bottom") {
+                this.label.setWidth('100%');
+            } else {
+                this.updateLabelWidth(this.getLabelWidth());
+            }
+        }
+
+        if (oldLabelAlign) {
+            renderElement.removeCls(prefix + 'label-align-' + oldLabelAlign);
+        }
+    },
+
+    // @private
+    updateLabelCls: function(newLabelCls, oldLabelCls) {
+        if (newLabelCls) {
+            this.label.addCls(newLabelCls);
+        }
+
+        if (oldLabelCls) {
+            this.label.removeCls(oldLabelCls);
+        }
+    },
+
+    // @private
+    updateLabelWidth: function(newLabelWidth) {
+        var labelAlign = this.getLabelAlign();
+
+        if (newLabelWidth) {
+            if (labelAlign == "top" || labelAlign == "bottom") {
+                this.label.setWidth('100%');
+            } else {
+                this.label.setWidth(newLabelWidth);
+            }
+        }
+    },
+
+    // @private
+    updateLabelWrap: function(newLabelWrap, oldLabelWrap) {
+        var cls = Ext.baseCSSPrefix + 'form-label-nowrap';
+
+        if (!newLabelWrap) {
+            this.addCls(cls);
+        } else {
+            this.removeCls(cls);
+        }
+    },
+
+    /**
+     * Updates the {@link #required} configuration
+     * @private
+     */
+    updateRequired: function(newRequired) {
+        this.renderElement[newRequired ? 'addCls' : 'removeCls'](this.getRequiredCls());
+    },
+
+    /**
+     * Updates the {@link #required} configuration
+     * @private
+     */
+    updateRequiredCls: function(newRequiredCls, oldRequiredCls) {
+        if (this.getRequired()) {
+            this.renderElement.replaceCls(oldRequiredCls, newRequiredCls);
+        }
+    },
+
+    // @private
+    initialize: function() {
+        var me = this;
+        me.callParent();
+
+        me.doInitValue();
+    },
+
+    /**
+     * @private
+     */
+    doInitValue: function() {
+        /**
+         * @property {Mixed} originalValue
+         * The original value of the field as configured in the {@link #value} configuration.
+         * setting is <code>true</code>.
+         */
+        this.originalValue = this.getInitialConfig().value;
+    },
+
+    /**
+     * Resets the current field value back to the original value on this field when it was created.
+     *
+     *     // This will create a field with an original value
+     *     var field = Ext.Viewport.add({
+     *         xtype: 'textfield',
+     *         value: 'first value'
+     *     });
+     *
+     *     // Update the value
+     *     field.setValue('new value');
+     *
+     *     // Now you can reset it back to the `first value`
+     *     field.reset();
+     *
+     * @return {Ext.field.Field} this
+     */
+    reset: function() {
+        this.setValue(this.originalValue);
+
+        return this;
+    },
+
+    /**
+     * <p>Returns true if the value of this Field has been changed from its {@link #originalValue}.
+     * Will return false if the field is disabled or has not been rendered yet.</p>
+     * @return {Boolean} True if this field has been changed from its original value (and
+     * is not disabled), false otherwise.
+     */
+    isDirty: function() {
+        return false;
+    }
+}, function() {
+});
+
+/**
+ * @aside guide forms
+ *
+ * The text field is the basis for most of the input fields in Sencha Touch. It provides a baseline of shared
+ * functionality such as input validation, standard events, state management and look and feel. Typically we create
+ * text fields inside a form, like this:
+ *
+ *     @example
+ *     Ext.create('Ext.form.Panel', {
+ *         fullscreen: true,
+ *         items: [
+ *             {
+ *                 xtype: 'fieldset',
+ *                 title: 'Enter your name',
+ *                 items: [
+ *                     {
+ *                         xtype: 'textfield',
+ *                         label: 'First Name',
+ *                         name: 'firstName'
+ *                     },
+ *                     {
+ *                         xtype: 'textfield',
+ *                         label: 'Last Name',
+ *                         name: 'lastName'
+ *                     }
+ *                 ]
+ *             }
+ *         ]
+ *     });
+ *
+ * This creates two text fields inside a form. Text Fields can also be created outside of a Form, like this:
+ *
+ *     Ext.create('Ext.field.Text', {
+ *         label: 'Your Name',
+ *         value: 'Ed Spencer'
+ *     });
+ *
+ * ## Configuring
+ *
+ * Text field offers several configuration options, including {@link #placeHolder}, {@link #maxLength},
+ * {@link #autoComplete}, {@link #autoCapitalize} and {@link #autoCorrect}. For example, here is how we would configure
+ * a text field to have a maximum length of 10 characters, with placeholder text that disappears when the field is
+ * focused:
+ *
+ *     Ext.create('Ext.field.Text', {
+ *         label: 'Username',
+ *         maxLength: 10,
+ *         placeHolder: 'Enter your username'
+ *     });
+ *
+ * The autoComplete, autoCapitalize and autoCorrect configs simply set those attributes on the text field and allow the
+ * native browser to provide those capabilities. For example, to enable auto complete and auto correct, simply
+ * configure your text field like this:
+ *
+ *     Ext.create('Ext.field.Text', {
+ *         label: 'Username',
+ *         autoComplete: true,
+ *         autoCorrect: true
+ *     });
+ *
+ * These configurations will be picked up by the native browser, which will enable the options at the OS level.
+ *
+ * Text field inherits from {@link Ext.field.Field}, which is the base class for all fields in Sencha Touch and provides
+ * a lot of shared functionality for all fields, including setting values, clearing and basic validation. See the
+ * {@link Ext.field.Field} documentation to see how to leverage its capabilities.
+ */
+Ext.define('Ext.field.Text', {
+    extend: 'Ext.field.Field',
+    xtype: 'textfield',
+    alternateClassName: 'Ext.form.Text',
+
+    /**
+     * @event focus
+     * Fires when this field receives input focus
+     * @param {Ext.field.Text} this This field
+     * @param {Ext.event.Event} e
+     */
+
+    /**
+     * @event blur
+     * Fires when this field loses input focus
+     * @param {Ext.field.Text} this This field
+     * @param {Ext.event.Event} e
+     */
+
+    /**
+     * @event paste
+     * Fires when this field is pasted.
+     * @param {Ext.field.Text} this This field
+     * @param {Ext.event.Event} e
+     */
+
+    /**
+     * @event mousedown
+     * Fires when this field receives a mousedown
+     * @param {Ext.field.Text} this This field
+     * @param {Ext.event.Event} e
+     */
+
+    /**
+     * @event keyup
+     * @preventable doKeyUp
+     * Fires when a key is released on the input element
+     * @param {Ext.field.Text} this This field
+     * @param {Ext.event.Event} e
+     */
+
+    /**
+     * @event clearicontap
+     * @preventable doClearIconTap
+     * Fires when the clear icon is tapped
+     * @param {Ext.field.Text} this This field
+     * @param {Ext.event.Event} e
+     */
+
+    /**
+     * @event change
+     * Fires just before the field blurs if the field value has changed
+     * @param {Ext.field.Text} this This field
+     * @param {Mixed} newValue The new value
+     * @param {Mixed} oldValue The original value
+     */
+
+    /**
+     * @event action
+     * @preventable doAction
+     * Fires whenever the return key or go is pressed. FormPanel listeners
+     * for this event, and submits itself whenever it fires. Also note
+     * that this event bubbles up to parent containers.
+     * @param {Ext.field.Text} this This field
+     * @param {Mixed} e The key event object
+     */
+
+    config: {
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        ui: 'text',
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        clearIcon: true,
+
+        /**
+         * @cfg {String} placeHolder A string value displayed in the input (if supported) when the control is empty.
+         * @accessor
+         */
+        placeHolder: null,
+
+        /**
+         * @cfg {Number} maxLength The maximum number of permitted input characters.
+         * @accessor
+         */
+        maxLength: null,
+
+        /**
+         * True to set the field's DOM element autocomplete attribute to "on", false to set to "off".
+         * @cfg {Boolean} autoComplete
+         * @accessor
+         */
+        autoComplete: null,
+
+        /**
+         * True to set the field's DOM element autocapitalize attribute to "on", false to set to "off".
+         * @cfg {Boolean} autoCapitalize
+         * @accessor
+         */
+        autoCapitalize: null,
+
+        /**
+         * True to set the field DOM element autocorrect attribute to "on", false to set to "off".
+         * @cfg {Boolean} autoCorrect
+         * @accessor
+         */
+        autoCorrect: null,
+
+        /**
+         * True to set the field DOM element readonly attribute to true.
+         * @cfg {Boolean} readOnly
+         * @accessor
+         */
+        readOnly: null,
+
+        /**
+         * @cfg {Object} component The inner component for this field, which defaults to an input text.
+         * @accessor
+         */
+        component: {
+            xtype: 'input',
+            type : 'text'
+        }
+    },
+
+    // @private
+    initialize: function() {
+        var me = this;
+
+        me.callParent();
+
+        me.getComponent().on({
+            scope: this,
+
+            keyup       : 'onKeyUp',
+            change      : 'onChange',
+            focus       : 'onFocus',
+            blur        : 'onBlur',
+            paste       : 'onPaste',
+            mousedown   : 'onMouseDown',
+            clearicontap: 'onClearIconTap'
+        });
+
+        // set the originalValue of the textfield, if one exists
+        me.originalValue = me.originalValue || "";
+        me.getComponent().originalValue = me.originalValue;
+
+        me.syncEmptyCls();
+    },
+
+    syncEmptyCls: function() {
+        var empty = (this._value) ? this._value.length : false,
+            cls = Ext.baseCSSPrefix + 'empty';
+
+        if (empty) {
+            this.removeCls(cls);
+        } else {
+            this.addCls(cls);
+        }
+    },
+
+    // @private
+    updateValue: function(newValue) {
+        var component  = this.getComponent(),
+            // allows newValue to be zero but not undefined, null or an empty string (other falsey values)
+            valueValid = newValue !== undefined && newValue !== null && newValue !== '';
+
+        if (component) {
+            component.setValue(newValue);
+        }
+
+        this[valueValid ? 'showClearIcon' : 'hideClearIcon']();
+
+        this.syncEmptyCls();
+    },
+
+    getValue: function() {
+        var me = this;
+
+        me._value = me.getComponent().getValue();
+
+        me.syncEmptyCls();
+
+        return me._value;
+    },
+
+    // @private
+    updatePlaceHolder: function(newPlaceHolder) {
+        this.getComponent().setPlaceHolder(newPlaceHolder);
+    },
+
+    // @private
+    updateMaxLength: function(newMaxLength) {
+        this.getComponent().setMaxLength(newMaxLength);
+    },
+
+    // @private
+    updateAutoComplete: function(newAutoComplete) {
+        this.getComponent().setAutoComplete(newAutoComplete);
+    },
+
+    // @private
+    updateAutoCapitalize: function(newAutoCapitalize) {
+        this.getComponent().setAutoCapitalize(newAutoCapitalize);
+    },
+
+    // @private
+    updateAutoCorrect: function(newAutoCorrect) {
+        this.getComponent().setAutoCorrect(newAutoCorrect);
+    },
+
+    // @private
+    updateReadOnly: function(newReadOnly) {
+        if (newReadOnly) {
+            this.hideClearIcon();
+        } else {
+            this.showClearIcon();
+        }
+
+        this.getComponent().setReadOnly(newReadOnly);
+    },
+
+    // @private
+    updateInputType: function(newInputType) {
+        var component = this.getComponent();
+        if (component) {
+            component.setType(newInputType);
+        }
+    },
+
+    // @private
+    updateName: function(newName) {
+        var component = this.getComponent();
+        if (component) {
+            component.setName(newName);
+        }
+    },
+
+    // @private
+    updateTabIndex: function(newTabIndex) {
+        var component = this.getComponent();
+        if (component) {
+            component.setTabIndex(newTabIndex);
+        }
+    },
+
+    /**
+     * Updates the {@link #inputCls} configuration on this fields {@link #component}
+     * @private
+     */
+    updateInputCls: function(newInputCls, oldInputCls) {
+        var component = this.getComponent();
+        if (component) {
+            component.replaceCls(oldInputCls, newInputCls);
+        }
+    },
+
+    doSetDisabled: function(disabled) {
+        var me = this;
+
+        me.callParent(arguments);
+
+        var component = me.getComponent();
+        if (component) {
+            component.setDisabled(disabled);
+        }
+
+        if (disabled) {
+            me.hideClearIcon();
+        } else {
+            me.showClearIcon();
+        }
+    },
+
+    // @private
+    showClearIcon: function() {
+        var me         = this,
+            value      = me.getValue(),
+            // allows value to be zero but not undefined, null or an empty string (other falsey values)
+            valueValid = value !== undefined && value !== null && value !== '';
+
+        if (me.getClearIcon() && !me.getDisabled() && !me.getReadOnly() && valueValid) {
+            me.element.addCls(Ext.baseCSSPrefix + 'field-clearable');
+        }
+
+        return me;
+    },
+
+    // @private
+    hideClearIcon: function() {
+        if (this.getClearIcon()) {
+            this.element.removeCls(Ext.baseCSSPrefix + 'field-clearable');
+        }
+    },
+
+    onKeyUp: function(e) {
+        this.fireAction('keyup', [this, e], 'doKeyUp');
+    },
+
+    /**
+     * Called when a key has been pressed in the `<input>`
+     * @private
+     */
+    doKeyUp: function(me, e) {
+        // getValue to ensure that we are in sync with the dom
+        var value      = me.getValue(),
+            // allows value to be zero but not undefined, null or an empty string (other falsey values)
+            valueValid = value !== undefined && value !== null && value !== '';
+
+        this[valueValid ? 'showClearIcon' : 'hideClearIcon']();
+
+        if (e.browserEvent.keyCode === 13) {
+            me.fireAction('action', [me, e], 'doAction');
+        }
+    },
+
+    doAction: function() {
+        this.blur();
+    },
+
+    onClearIconTap: function(e) {
+        this.fireAction('clearicontap', [this, e], 'doClearIconTap');
+    },
+
+    // @private
+    doClearIconTap: function(me, e) {
+        me.setValue('');
+
+        //sync with the input
+        me.getValue();
+    },
+
+    onChange: function(me, value, startValue) {
+        me.fireEvent('change', this, value, startValue);
+    },
+
+    onFocus: function(e) {
+        this.isFocused = true;
+        this.fireEvent('focus', this, e);
+    },
+
+    onBlur: function(e) {
+        var me = this;
+
+        this.isFocused = false;
+
+        me.fireEvent('blur', me, e);
+
+        setTimeout(function() {
+            me.isFocused = false;
+        }, 50);
+    },
+
+    onPaste: function(e) {
+        this.fireEvent('paste', this, e);
+    },
+
+    onMouseDown: function(e) {
+        this.fireEvent('mousedown', this, e);
+    },
+
+    /**
+     * Attempts to set the field as the active input focus.
+     * @return {Ext.field.Text} This field
+     */
+    focus: function() {
+        this.getComponent().focus();
+        return this;
+    },
+
+    /**
+     * Attempts to forcefully blur input focus for the field.
+     * @return {Ext.field.Text} This field
+     */
+    blur: function() {
+        this.getComponent().blur();
+        return this;
+    },
+
+    /**
+     * Attempts to forcefully select all the contents of the input field.
+     * @return {Ext.field.Text} this
+     */
+    select: function() {
+        this.getComponent().select();
+        return this;
+    },
+
+    reset: function() {
+        this.getComponent().reset();
+
+        //we need to call this to sync the input with this field
+        this.getValue();
+
+        this[this._value ? 'showClearIcon' : 'hideClearIcon']();
+    },
+
+    isDirty: function() {
+        var component = this.getComponent();
+        if (component) {
+            return component.isDirty();
+        }
+        return false;
+    }
+});
+
+
+/**
+ * @aside guide forms
+ *
+ * Creates an HTML textarea field on the page. This is useful whenever you need the user to enter large amounts of text
+ * (i.e. more than a few words). Typically, text entry on mobile devices is not a pleasant experience for the user so
+ * it's good to limit your use of text areas to only those occasions when freeform text is required or alternative
+ * input methods like select boxes or radio buttons are not possible. Text Areas are usually created inside forms, like
+ * this:
+ *
+ *     @example
+ *     Ext.create('Ext.form.Panel', {
+ *         fullscreen: true,
+ *         items: [
+ *             {
+ *                 xtype: 'fieldset',
+ *                 title: 'About you',
+ *                 items: [
+ *                     {
+ *                         xtype: 'textfield',
+ *                         label: 'Name',
+ *                         name: 'name'
+ *                     },
+ *                     {
+ *                         xtype: 'textareafield',
+ *                         label: 'Bio',
+ *                         maxRows: 4,
+ *                         name: 'bio'
+ *                     }
+ *                 ]
+ *             }
+ *         ]
+ *     });
+ *
+ * In the example above we're creating a form with a {@link Ext.field.Text text field} for the user's name and a text
+ * area for their bio. We used the {@link #maxRows} configuration on the text area to tell it to grow to a maximum of 4
+ * rows of text before it starts using a scroll bar inside the text area to scroll the text.
+ *
+ * We can also create a text area outside the context of a form, like this:
+ *
+ * This creates two text fields inside a form. Text Fields can also be created outside of a Form, like this:
+ *
+ *     Ext.create('Ext.field.TextArea', {
+ *         label: 'About You',
+ *         {@link #placeHolder}: 'Tell us about yourself...'
+ *     });
+ */
+Ext.define('Ext.field.TextArea', {
+    extend: 'Ext.field.Text',
+    xtype: 'textareafield',
+    requires: ['Ext.field.TextAreaInput'],
+    alternateClassName: 'Ext.form.TextArea',
+
+    config: {
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        ui: 'textarea',
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        autoCapitalize: false,
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        component: {
+            xtype: 'textareainput'
+        },
+
+        /**
+         * @cfg {Number} maxRows The maximum number of lines made visible by the input.
+         * @accessor
+         */
+        maxRows: null
+    },
+
+    // @private
+    updateMaxRows: function(newRows) {
+        this.getComponent().setMaxRows(newRows);
+    },
+
+    doSetHeight: function(newHeight) {
+        this.callParent(arguments);
+        var component = this.getComponent();
+        component.input.setHeight(newHeight);
+    },
+
+    doSetWidth: function(newWidth) {
+        this.callParent(arguments);
+        var component = this.getComponent();
+        component.input.setWidth(newWidth);
+    },
+
+    /**
+     * Called when a key has been pressed in the `<input>`
+     * @private
+     */
+    doKeyUp: function(me) {
+        // getValue to ensure that we are in sync with the dom
+        var value = me.getValue();
+
+        // show the {@link #clearIcon} if it is being used
+        me[value ? 'showClearIcon' : 'hideClearIcon']();
+    }
+});
+
+/**
+ * Utility class for generating different styles of message boxes. The framework provides a global singleton
+ * {@link Ext.Msg} for common usage which you should use in most cases.
+ *
+ * If you want to use {@link Ext.MessageBox} directly, just think of it as a modal {@link Ext.Container}.
+ *
+ * Note that the MessageBox is asynchronous. Unlike a regular JavaScript `alert` (which will halt browser execution),
+ * showing a MessageBox will not cause the code to stop. For this reason, if you have code that should only run _after_
+ * some user feedback from the MessageBox, you must use a callback function (see the `fn` configuration option parameter
+ * for the {@link #method-show show} method for more details).
+ *
+ *     @example preview
+ *     Ext.Msg.alert('Title', 'The quick brown fox jumped over the lazy dog.', Ext.emptyFn);
+ *
+ * Checkout {@link Ext.Msg} for more examples.
+ *
+ */
+Ext.define('Ext.MessageBox', {
+    extend  : 'Ext.Sheet',
+    requires: [
+        'Ext.Toolbar',
+        'Ext.field.Text',
+        'Ext.field.TextArea'
+    ],
+
+    config: {
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        ui: 'dark',
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        baseCls: Ext.baseCSSPrefix + 'msgbox',
+
+        /**
+         * @cfg {String} iconCls
+         * CSS class for the icon. The icon should be 40px x 40px.
+         * @accessor
+         */
+        iconCls: null,
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        showAnimation: {
+            type: 'popIn',
+            duration: 250,
+            easing: 'ease-out'
+        },
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        hideAnimation: {
+            type: 'popOut',
+            duration: 250,
+            easing: 'ease-out'
+        },
+
+        /**
+         * Override the default zIndex so it is normally always above floating components.
+         */
+        zIndex: 999,
+
+        /**
+         * @cfg {Number} defaultTextHeight
+         * The default height in pixels of the message box's multiline textarea if displayed.
+         * @accessor
+         */
+        defaultTextHeight: 75,
+
+        /**
+         * @cfg {String} title
+         * The title of this {@link Ext.MessageBox}.
+         * @accessor
+         */
+        title: null,
+
+        /**
+         * @cfg {Array/Object} buttons
+         * An array of buttons, or an object of a button to be displayed in the toolbar of this {@link Ext.MessageBox}.
+         */
+        buttons: null,
+
+        /**
+         * @cfg {String} message
+         * The message to be displayed in the {@link Ext.MessageBox}.
+         * @accessor
+         */
+        message: null,
+
+        /**
+         * @cfg {String} msg
+         * The message to be displayed in the {@link Ext.MessageBox}.
+         * @removed 2.0.0 Please use {@link #message} instead.
+         */
+
+        /**
+         * @cfg {Object} prompt
+         * The configuration to be passed if you want an {@link Ext.field.Text} or {@link Ext.field.TextArea} field
+         * in your {@link Ext.MessageBox}.
+         *
+         * Pass an object with the property "multiline" with a value of true, if you want the prompt to use a TextArea.
+         *
+         * Alternatively, you can just pass in an object which has an xtype/xclass of another component.
+         *
+         *     prompt: {
+         *         xtype: 'textarea',
+         *         value: 'test'
+         *     }
+         *
+         * @accessor
+         */
+        prompt: null,
+
+        /**
+         * @cfg
+         * @inheritdoc
+         */
+        layout: {
+            type: 'vbox',
+            pack: 'center'
+        }
+    },
+
+    statics: {
+        OK    : {text: 'OK',     itemId: 'ok',  ui: 'action'},
+        YES   : {text: 'Yes',    itemId: 'yes', ui: 'action'},
+        NO    : {text: 'No',     itemId: 'no'},
+        CANCEL: {text: 'Cancel', itemId: 'cancel'},
+
+        INFO    : Ext.baseCSSPrefix + 'msgbox-info',
+        WARNING : Ext.baseCSSPrefix + 'msgbox-warning',
+        QUESTION: Ext.baseCSSPrefix + 'msgbox-question',
+        ERROR   : Ext.baseCSSPrefix + 'msgbox-error',
+
+        OKCANCEL: [
+            {text: 'Cancel', itemId: 'cancel'},
+            {text: 'OK',     itemId: 'ok',  ui : 'action'}
+        ],
+        YESNOCANCEL: [
+            {text: 'Cancel', itemId: 'cancel'},
+            {text: 'No',     itemId: 'no'},
+            {text: 'Yes',    itemId: 'yes', ui: 'action'}
+        ],
+        YESNO: [
+            {text: 'No',  itemId: 'no'},
+            {text: 'Yes', itemId: 'yes', ui: 'action'}
+        ]
+    },
+
+    constructor: function(config) {
+        config = config || {};
+
+        if (config.hasOwnProperty('promptConfig')) {
+
+            Ext.applyIf(config, {
+                prompt: config.promptConfig
+            });
+
+            delete config.promptConfig;
+        }
+
+        if (config.hasOwnProperty('multiline') || config.hasOwnProperty('multiLine')) {
+            config.prompt = config.prompt || {};
+            Ext.applyIf(config.prompt, {
+                multiLine: config.multiline || config.multiLine
+            });
+
+            delete config.multiline;
+            delete config.multiLine;
+        }
+
+        this.defaultAllowedConfig = {};
+        var allowedConfigs = ['ui', 'showAnimation', 'hideAnimation', 'title', 'message', 'prompt', 'iconCls', 'buttons', 'defaultTextHeight'],
+            ln = allowedConfigs.length,
+            i, allowedConfig;
+
+        for (i = 0; i < ln; i++) {
+            allowedConfig = allowedConfigs[i];
+            this.defaultAllowedConfig[allowedConfig] = this.defaultConfig[allowedConfig];
+        }
+
+        this.callParent([config]);
+    },
+
+    /**
+     * Creates a new {@link Ext.Toolbar} instance using {@link Ext#factory}
+     * @private
+     */
+    applyTitle: function(config) {
+        if (typeof config == "string") {
+            config = {
+                title: config
+            };
+        }
+
+        Ext.applyIf(config, {
+            docked: 'top',
+            cls   : this.getBaseCls() + '-title'
+        });
+
+        return Ext.factory(config, Ext.Toolbar, this.getTitle());
+    },
+
+    /**
+     * Adds the new {@link Ext.Toolbar} instance into this container
+     * @private
+     */
+    updateTitle: function(newTitle) {
+        if (newTitle) {
+            this.add(newTitle);
+        }
+    },
+
+    /**
+     * Adds the new {@link Ext.Toolbar} instance into this container
+     * @private
+     */
+    updateButtons: function(newButtons) {
+        var me = this;
+
+        if (newButtons) {
+            if (me.buttonsToolbar) {
+                me.buttonsToolbar.removeAll();
+                me.buttonsToolbar.setItems(newButtons);
+            } else {
+                me.buttonsToolbar = Ext.create('Ext.Toolbar', {
+                    docked     : 'bottom',
+                    defaultType: 'button',
+                    layout     : {
+                        type: 'hbox',
+                        pack: 'center'
+                    },
+                    ui         : me.getUi(),
+                    cls        : me.getBaseCls() + '-buttons',
+                    items      : newButtons
+                });
+
+                me.add(me.buttonsToolbar);
+            }
+        }
+    },
+
+    /**
+     * @private
+     */
+    applyMessage: function(config) {
+        config = {
+            html : config,
+            cls  : this.getBaseCls() + '-text'
+        };
+
+        return Ext.factory(config, Ext.Component, this._message);
+    },
+
+    /**
+     * @private
+     */
+    updateMessage: function(newMessage) {
+        if (newMessage) {
+            this.add(newMessage);
+        }
+    },
+
+    getMessage: function() {
+        if (this._message) {
+            return this._message.getHtml();
+        }
+
+        return null;
+    },
+
+    /**
+     * @private
+     */
+    applyIconCls: function(config) {
+        config = {
+            xtype : 'component',
+            docked: 'left',
+            width : 40,
+            height: 40,
+            baseCls: Ext.baseCSSPrefix + 'icon',
+            hidden: (config) ? false : true,
+            cls: config
+        };
+
+        return Ext.factory(config, Ext.Component, this._iconCls);
+    },
+
+    /**
+     * @private
+     */
+    updateIconCls: function(newIconCls, oldIconCls) {
+        var me = this;
+
+        //ensure the title and button elements are added first
+        this.getTitle();
+        this.getButtons();
+
+        if (newIconCls) {
+            this.add(newIconCls);
+        } else {
+            this.remove(oldIconCls);
+        }
+    },
+
+    getIconCls: function() {
+        var icon = this._iconCls,
+            iconCls;
+
+        if (icon) {
+            iconCls = icon.getCls();
+            return (iconCls) ? iconCls[0] : null;
+        }
+
+        return null;
+    },
+
+    /**
+     * @private
+     */
+    applyPrompt: function(prompt) {
+        if (prompt) {
+            var config = {
+                label: false
+            };
+
+            if (Ext.isObject(prompt)) {
+                Ext.apply(config, prompt);
+            }
+
+            if (config.multiLine) {
+                config.height = Ext.isNumber(config.multiLine) ? parseFloat(config.multiLine) : this.getDefaultTextHeight();
+                return Ext.factory(config, Ext.field.TextArea, this.getPrompt());
+            } else {
+                return Ext.factory(config, Ext.field.Text, this.getPrompt());
+            }
+        }
+
+        return prompt;
+    },
+
+    /**
+     * @private
+     */
+    updatePrompt: function(newPrompt, oldPrompt) {
+        if (newPrompt) {
+            this.add(newPrompt);
+        }
+
+        if (oldPrompt) {
+            this.remove(oldPrompt);
+        }
+    },
+
+    // @private
+    // pass `fn` config to show method instead
+    onClick: function(button) {
+        if (button) {
+            var config = button.config.userConfig || {},
+                initialConfig = button.getInitialConfig(),
+                prompt = this.getPrompt();
+
+            if (typeof config.fn == 'function') {
+                this.on({
+                    hiddenchange: function() {
+                        config.fn.call(
+                            config.scope || null,
+                            initialConfig.itemId || initialConfig.text,
+                            prompt ? prompt.getValue() : null,
+                            config
+                        );
+                    },
+                    single: true,
+                    scope: this
+                });
+            }
+
+            if (config.input) {
+                config.input.dom.blur();
+            }
+        }
+
+        this.hide();
+    },
+
+    /**
+     * Displays the {@link Ext.MessageBox} with a specified configuration. All
+     * display functions (e.g. {@link #method-prompt}, {@link #alert}, {@link #confirm})
+     * on MessageBox call this function internally, although those calls
+     * are basic shortcuts and do not support all of the config options allowed here.
+     *
+     * Example usage:
+     *
+     *     Ext.Msg.show({
+     *        title: 'Address',
+     *        message: 'Please enter your address:',
+     *        width: 300,
+     *        buttons: Ext.MessageBox.OKCANCEL,
+     *        multiLine: true,
+     *        prompt : { maxlength : 180, autocapitalize : true },
+     *        fn: function(buttonId) {
+     *            console.log('You pressed the "' + buttonId + '" button.');
+     *        }
+     *     });
+     *
+     * @param {Object} config An object with the following config options:
+     *
+     * @param {Object/Array} config.buttons
+     * A button config object or Array of the same(e.g., `Ext.MessageBox.OKCANCEL` or `{text:'Foo', itemId:'cancel'}`),
+     * or false to not show any buttons.
+     *
+     * Defaults to: `false`
+     *
+     * @param {String} config.cls
+     * A custom CSS class to apply to the message box's container element.
+     *
+     * @param {Function} config.fn
+     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
+     *
+     * @param {String} config.fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
+     * @param {String} config.fn.value Value of the input field if either `prompt` or `multiline` option is true.
+     * @param {Object} config.fn.opt The config object passed to show.
+     *
+     * @param {Number} config.width
+     * A fixed width for the MessageBox.
+     *
+     * Defaults to: `auto`
+     *
+     * @param {Number} config.height
+     * A fixed height for the MessageBox.
+     *
+     * Defaults to: `auto`
+     *
+     * @param {Object} config.scope
+     * The scope of the callback function
+     *
+     * @param {String} config.icon
+     * A CSS class that provides a background image to be used as the body icon for the dialog
+     * (e.g. Ext.MessageBox.WARNING or 'custom-class').
+     *
+     * @param {Boolean} config.modal
+     * False to allow user interaction with the page while the message box is displayed.
+     *
+     * Defaults to: `true`
+     *
+     * @param {String} config.message
+     * A string that will replace the existing message box body text.
+     * Defaults to the XHTML-compliant non-breaking space character `&#160;`.
+     *
+     * @param {Number} config.defaultTextHeight
+     * The default height in pixels of the message box's multiline textarea if displayed.
+     *
+     * Defaults to: `75`
+     *
+     * @param {Boolean} config.prompt
+     * True to prompt the user to enter single-line text. Please view the {@link Ext.MessageBox#method-prompt} documentation in {@link Ext.MessageBox}.
+     * for more information.
+     *
+     * Defaults to: `false`
+     *
+     * @param {Boolean} config.multiline
+     * True to prompt the user to enter multi-line text.
+     *
+     * Defaults to: `false`
+     *
+     * @param {String} config.title
+     * The title text.
+     *
+     * @param {String} config.value
+     * The string value to set into the active textbox element if displayed.
+     *
+     * @return {Ext.MessageBox} this
+     */
+    show: function(initialConfig) {
+        //if it has not been added to a container, add it to the Viewport.
+        if (!this.getParent() && Ext.Viewport) {
+            Ext.Viewport.add(this);
+        }
+
+        if (!initialConfig) {
+            return this.callParent();
+        }
+
+        var config = Ext.Object.merge({}, {
+            value: ''
+        }, initialConfig);
+
+        var buttons        = initialConfig.buttons || Ext.MessageBox.OK || [],
+            buttonBarItems = [],
+            userConfig     = initialConfig;
+
+        Ext.each(buttons, function(buttonConfig) {
+            if (!buttonConfig) {
+                return;
+            }
+
+            buttonBarItems.push(Ext.apply({
+                userConfig: userConfig,
+                scope     : this,
+                handler   : 'onClick'
+            }, buttonConfig));
+        }, this);
+
+        config.buttons = buttonBarItems;
+
+        if (config.promptConfig) {
+        }
+        config.prompt = (config.promptConfig || config.prompt) || null;
+
+        if (config.multiLine) {
+            config.prompt = config.prompt || {};
+            config.prompt.multiLine = config.multiLine;
+            delete config.multiLine;
+        }
+
+        config = Ext.merge({}, this.defaultAllowedConfig, config);
+
+        this.setConfig(config);
+
+        var prompt = this.getPrompt();
+        if (prompt) {
+            prompt.setValue(initialConfig.value || '');
+        }
+
+        this.callParent();
+
+        return this;
+    },
+
+    /**
+     * Displays a standard read-only message box with an OK button (comparable to the basic JavaScript alert prompt). If
+     * a callback function is passed it will be called after the user clicks the button, and the itemId of the button
+     * that was clicked will be passed as the only parameter to the callback.
+     *
+     * @param {String} title The title bar text
+     *
+     * @param {String} message The message box body text
+     *
+     * @param {Function} fn
+     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
+     *
+     * @param {String} fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
+     * @param {String} fn.value Value of the input field if either `prompt` or `multiline` option is true.
+     * @param {Object} fn.opt The config object passed to show.
+     *
+     * @param {Object} scope The scope (`this` reference) in which the callback is executed.
+     * Defaults to: the browser window
+     *
+     * @return {Ext.MessageBox} this
+     */
+    alert: function(title, message, fn, scope) {
+        return this.show({
+            title       : title || '',
+            message     : message || '',
+            buttons     : Ext.MessageBox.OK,
+            promptConfig: false,
+            fn          : function() {
+                if (fn) {
+                    fn.apply(scope, arguments);
+                }
+            },
+            scope: scope
+        });
+    },
+
+    /**
+     * Displays a confirmation message box with Yes and No buttons (comparable to JavaScript's confirm). If a callback
+     * function is passed it will be called after the user clicks either button, and the id of the button that was
+     * clicked will be passed as the only parameter to the callback (could also be the top-right close button).
+     *
+     * @param {String} title The title bar text
+     *
+     * @param {String} message The message box body text
+     *
+     * @param {Function} fn
+     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
+     *
+     * @param {String} fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
+     * @param {String} fn.value Value of the input field if either `prompt` or `multiline` option is true.
+     * @param {Object} fn.opt The config object passed to show.
+     *
+     * @param {Object} scope The scope (`this` reference) in which the callback is executed.
+     *
+     * Defaults to: the browser window
+     *
+     * @return {Ext.MessageBox} this
+     */
+    confirm: function(title, message, fn, scope) {
+        return this.show({
+            title       : title || '',
+            message     : message || '',
+            buttons     : Ext.MessageBox.YESNO,
+            promptConfig: false,
+            scope       : scope,
+            fn: function() {
+                if (fn) {
+                    fn.apply(scope, arguments);
+                }
+            }
+        });
+    },
+
+    /**
+     * Displays a message box with OK and Cancel buttons prompting the user to enter some text (comparable to
+     * JavaScript's prompt). The prompt can be a single-line or multi-line textbox. If a callback function is passed it
+     * will be called after the user clicks either button, and the id of the button that was clicked (could also be the
+     * top-right close button) and the text that was entered will be passed as the two parameters to the callback.
+     *
+     * Example usage:
+     *
+     *     Ext.Msg.prompt(
+     *         'Welcome!',
+     *         'What\'s your name going to be today?',
+     *         function (buttonId, value) {
+     *             console.log(value)
+     *         },
+     *         null,
+     *         false,
+     *         null,
+     *         { autoCapitalize : true, placeHolder : 'First-name please...' }
+     *     );
+     *
+     * @param {String} title The title bar text
+     *
+     * @param {String} message The message box body text
+     *
+     * @param {Function} fn
+     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
+     *
+     * @param {String} fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
+     * @param {String} fn.value Value of the input field if either `prompt` or `multiline` option is true.
+     * @param {Object} fn.opt The config object passed to show.
+     *
+     * @param {Object} scope The scope (`this` reference) in which the callback is executed.
+     *
+     * Defaults to: the browser window.
+     *
+     * @param {Boolean/Number} multiLine True to create a multiline textbox using the defaultTextHeight property,
+     * or the height in pixels to create the textbox.
+     *
+     * Defaults to: `false`
+     *
+     * @param {String} value Default value of the text input element.
+     *
+     * @param {Object} prompt
+     * The configuration for the prompt. See the {@link Ext.MessageBox#cfg-prompt prompt} documentation in {@link Ext.MessageBox}
+     * for more information.
+     *
+     * Defaults to: `true`
+     *
+     * @return {Ext.MessageBox} this
+     */
+    prompt: function(title, message, fn, scope, multiLine, value, prompt) {
+        return this.show({
+            title    : title || '',
+            message  : message || '',
+            buttons  : Ext.MessageBox.OKCANCEL,
+            scope    : scope,
+            prompt   : prompt || true,
+            multiLine: multiLine,
+            value    : value,
+            fn: function() {
+                if (fn) {
+                    fn.apply(scope, arguments);
+                }
+            }
+        });
+    }
+}, function(MessageBox) {
+
+    Ext.onSetup(function() {
+        /**
+         * @class Ext.Msg
+         * @extends Ext.MessageBox
+         * @singleton
+         *
+         * A global shared singleton instance of the {@link Ext.MessageBox} class.
+         *
+         * Allows for simple creation of various different alerts and notifications.
+         *
+         * To change any cofigurations on this singleton instance, you must change the
+         * defaultAllowedConfig object.  For example to remove all animations on Msg:
+         *
+         * Ext.Msg.defaultAllowedConfig.showAnimation = false;
+         * Ext.Msg.defaultAllowedConfig.hideAnimation = false;
+         *
+         * ## Examples
+         *
+         * ### Alert
+         * Use the {@link #alert} method to show a basic alert:
+         *
+         *     @example preview
+         *     Ext.Msg.alert('Title', 'The quick brown fox jumped over the lazy dog.', Ext.emptyFn);
+         *
+         * ### Prompt
+         * Use the {@link #method-prompt} method to show an alert which has a textfield:
+         *
+         *     @example preview
+         *     Ext.Msg.prompt('Name', 'Please enter your name:', function(text) {
+         *         // process text value and close...
+         *     });
+         *
+         * ### Confirm
+         * Use the {@link #confirm} method to show a confirmation alert (shows yes and no buttons).
+         *
+         *     @example preview
+         *     Ext.Msg.confirm("Confirmation", "Are you sure you want to do that?", Ext.emptyFn);
+         */
+        Ext.Msg = new MessageBox;
+    });
 });
 
 
@@ -30829,2296 +33486,6 @@ Ext.define('Ext.data.StoreManager', {
 });
 
 /**
- * @aside guide floating_components
- *
- * Panels are most useful as Overlays - containers that float over your application. They contain extra styling such
- * that when you {@link #showBy} another component, the container will appear in a rounded black box with a 'tip'
- * pointing to a reference component.
- *
- * If you don't need this extra functionality, you should use {@link Ext.Container} instead. See the
- * [Overlays example](#!/example/overlays) for more use cases.
- *
- *      @example miniphone preview
- *
- *      var button = Ext.create('Ext.Button', {
- *           text: 'Button',
- *           id: 'rightButton'
- *      });
- *
- *      Ext.create('Ext.Container', {
- *          fullscreen: true,
- *          items: [
- *              {
- *                   docked: 'top',
- *                   xtype: 'titlebar',
- *                   items: [
- *                       button
- *                   ]
- *               }
- *          ]
- *      });
- *
- *      Ext.create('Ext.Panel', {
- *          html: 'Floating Panel',
- *          left: 0,
- *          padding: 10
- *      }).showBy(button);
- *
- */
-Ext.define('Ext.Panel', {
-    extend: 'Ext.Container',
-    requires: ['Ext.util.LineSegment'],
-
-    alternateClassName: 'Ext.lib.Panel',
-
-    xtype: 'panel',
-
-    isPanel: true,
-
-    config: {
-        baseCls: Ext.baseCSSPrefix + 'panel',
-
-        /**
-         * @cfg {Number/Boolean/String} bodyPadding
-         * A shortcut for setting a padding style on the body element. The value can either be
-         * a number to be applied to all sides, or a normal css string describing padding.
-         * @deprecated 2.0.0
-         */
-        bodyPadding: null,
-
-        /**
-         * @cfg {Number/Boolean/String} bodyMargin
-         * A shortcut for setting a margin style on the body element. The value can either be
-         * a number to be applied to all sides, or a normal css string describing margins.
-         * @deprecated 2.0.0
-         */
-        bodyMargin: null,
-
-        /**
-         * @cfg {Number/Boolean/String} bodyBorder
-         * A shortcut for setting a border style on the body element. The value can either be
-         * a number to be applied to all sides, or a normal css string describing borders.
-         * @deprecated 2.0.0
-         */
-        bodyBorder: null
-    },
-
-    getElementConfig: function() {
-        var config = this.callParent();
-
-        config.children.push({
-            reference: 'tipElement',
-            className: 'x-anchor',
-            hidden: true
-        });
-
-        return config;
-    },
-
-    applyBodyPadding: function(bodyPadding) {
-        if (bodyPadding === true) {
-            bodyPadding = 5;
-        }
-
-        if (bodyPadding) {
-            bodyPadding = Ext.dom.Element.unitizeBox(bodyPadding);
-        }
-
-        return bodyPadding;
-    },
-
-    updateBodyPadding: function(newBodyPadding) {
-        this.element.setStyle('padding', newBodyPadding);
-    },
-
-    applyBodyMargin: function(bodyMargin) {
-        if (bodyMargin === true) {
-            bodyMargin = 5;
-        }
-
-        if (bodyMargin) {
-            bodyMargin = Ext.dom.Element.unitizeBox(bodyMargin);
-        }
-
-        return bodyMargin;
-    },
-
-    updateBodyMargin: function(newBodyMargin) {
-        this.element.setStyle('margin', newBodyMargin);
-    },
-
-    applyBodyBorder: function(bodyBorder) {
-        if (bodyBorder === true) {
-            bodyBorder = 1;
-        }
-
-        if (bodyBorder) {
-            bodyBorder = Ext.dom.Element.unitizeBox(bodyBorder);
-        }
-
-        return bodyBorder;
-    },
-
-    updateBodyBorder: function(newBodyBorder) {
-        this.element.setStyle('border-width', newBodyBorder);
-    },
-
-    alignTo: function(component) {
-        var tipElement = this.tipElement;
-
-        tipElement.hide();
-
-        if (this.currentTipPosition) {
-            tipElement.removeCls('x-anchor-' + this.currentTipPosition);
-        }
-
-        this.callParent(arguments);
-
-        var LineSegment = Ext.util.LineSegment,
-            alignToElement = component.isComponent ? component.renderElement : component,
-            element = this.renderElement,
-            alignToBox = alignToElement.getPageBox(),
-            box = element.getPageBox(),
-            left = box.left,
-            top = box.top,
-            right = box.right,
-            bottom = box.bottom,
-            centerX = left + (box.width / 2),
-            centerY = top + (box.height / 2),
-            leftTopPoint = { x: left, y: top },
-            rightTopPoint = { x: right, y: top },
-            leftBottomPoint = { x: left, y: bottom },
-            rightBottomPoint = { x: right, y: bottom },
-            boxCenterPoint = { x: centerX, y: centerY },
-            alignToCenterX = alignToBox.left + (alignToBox.width / 2),
-            alignToCenterY = alignToBox.top + (alignToBox.height / 2),
-            alignToBoxCenterPoint = { x: alignToCenterX, y: alignToCenterY },
-            centerLineSegment = new LineSegment(boxCenterPoint, alignToBoxCenterPoint),
-            offsetLeft = 0,
-            offsetTop = 0,
-            tipSize, tipWidth, tipHeight, tipPosition, tipX, tipY;
-
-        tipElement.setVisibility(false);
-        tipElement.show();
-        tipSize = tipElement.getSize();
-        tipWidth = tipSize.width;
-        tipHeight = tipSize.height;
-
-        if (centerLineSegment.intersects(new LineSegment(leftTopPoint, rightTopPoint))) {
-            tipX = Math.min(Math.max(alignToCenterX, left), right - (tipWidth / 2));
-            tipY = top;
-            offsetTop = tipHeight + 10;
-            tipPosition = 'top';
-        }
-        else if (centerLineSegment.intersects(new LineSegment(leftTopPoint, leftBottomPoint))) {
-            tipX = left;
-            tipY = Math.min(Math.max(alignToCenterY + (tipWidth / 2), top), bottom);
-            offsetLeft = tipHeight + 10;
-            tipPosition = 'left';
-        }
-        else if (centerLineSegment.intersects(new LineSegment(leftBottomPoint, rightBottomPoint))) {
-            tipX = Math.min(Math.max(alignToCenterX, left), right - (tipWidth / 2));
-            tipY = bottom;
-            offsetTop = -tipHeight - 10;
-            tipPosition = 'bottom';
-        }
-        else if (centerLineSegment.intersects(new LineSegment(rightTopPoint, rightBottomPoint))) {
-            tipX = right;
-            tipY = Math.min(Math.max(alignToCenterY - (tipWidth / 2), top), bottom);
-            offsetLeft = -tipHeight - 10;
-            tipPosition = 'right';
-        }
-
-        if (tipX || tipY) {
-            this.currentTipPosition = tipPosition;
-            tipElement.addCls('x-anchor-' + tipPosition);
-            tipElement.setLeft(tipX - left);
-            tipElement.setTop(tipY - top);
-            tipElement.setVisibility(true);
-
-            this.setLeft(this.getLeft() + offsetLeft);
-            this.setTop(this.getTop() + offsetTop);
-        }
-    }
-});
-
-/**
- * A general sheet class. This renderable container provides base support for orientation-aware transitions for popup or
- * side-anchored sliding Panels.
- *
- * In most cases, you should use {@link Ext.ActionSheet}, {@link Ext.MessageBox}, {@link Ext.picker.Picker} or {@link Ext.picker.Date}.
- */
-Ext.define('Ext.Sheet', {
-    extend: 'Ext.Panel',
-
-    xtype: 'sheet',
-
-    requires: ['Ext.fx.Animation'],
-
-    config: {
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        baseCls: Ext.baseCSSPrefix + 'sheet',
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        modal: true,
-
-        /**
-         * @cfg {Boolean} centered
-         * Whether or not this component is absolutely centered inside its container
-         * @accessor
-         * @evented
-         */
-        centered: true,
-
-        /**
-         * @cfg {Boolean} stretchX True to stretch this sheet horizontally.
-         */
-        stretchX: null,
-
-        /**
-         * @cfg {Boolean} stretchY True to stretch this sheet vertically.
-         */
-        stretchY: null,
-
-        /**
-         * @cfg {String} enter
-         * The viewport side used as the enter point when shown (top, bottom, left, right)
-         * Applies to sliding animation effects only. Defaults to 'bottom'
-         */
-        enter: 'bottom',
-
-        /**
-         * @cfg {String} exit
-         * The viewport side used as the exit point when hidden (top, bottom, left, right)
-         * Applies to sliding animation effects only. Defaults to 'bottom'
-         */
-        exit: 'bottom',
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        showAnimation: !Ext.os.is.Android2 ? {
-            type: 'slideIn',
-            duration: 250,
-            easing: 'ease-out'
-        } : null,
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        hideAnimation: !Ext.os.is.Android2 ? {
-            type: 'slideOut',
-            duration: 250,
-            easing: 'ease-in'
-        } : null
-    },
-
-    applyHideAnimation: function(config) {
-        var exit = this.getExit(),
-            direction = exit;
-
-        if (exit === null) {
-            return null;
-        }
-
-        if (config === true) {
-            config = {
-                type: 'slideOut'
-            };
-        }
-        if (Ext.isString(config)) {
-            config = {
-                type: config
-            };
-        }
-        var anim = Ext.factory(config, Ext.fx.Animation);
-
-        if (anim) {
-            if (exit == 'bottom') {
-                direction = 'down';
-            }
-            if (exit == 'top') {
-                direction = 'up';
-            }
-            anim.setDirection(direction);
-        }
-        return anim;
-    },
-
-    applyShowAnimation: function(config) {
-        var enter = this.getEnter(),
-            direction = enter;
-
-        if (enter === null) {
-            return null;
-        }
-
-        if (config === true) {
-            config = {
-                type: 'slideIn'
-            };
-        }
-        if (Ext.isString(config)) {
-            config = {
-                type: config
-            };
-        }
-        var anim = Ext.factory(config, Ext.fx.Animation);
-
-        if (anim) {
-            if (enter == 'bottom') {
-                direction = 'down';
-            }
-            if (enter == 'top') {
-                direction = 'up';
-            }
-            anim.setBefore({
-                display: null
-            });
-            anim.setReverse(true);
-            anim.setDirection(direction);
-        }
-        return anim;
-    },
-
-    updateStretchX: function(newStretchX) {
-        this.getLeft();
-        this.getRight();
-
-        if (newStretchX) {
-            this.setLeft(0);
-            this.setRight(0);
-        }
-    },
-
-    updateStretchY: function(newStretchY) {
-        this.getTop();
-        this.getBottom();
-
-        if (newStretchY) {
-            this.setTop(0);
-            this.setBottom(0);
-        }
-    }
-});
-
-/**
- * @private
- */
-Ext.define('Ext.field.TextAreaInput', {
-    extend: 'Ext.field.Input',
-    xtype : 'textareainput',
-
-    tag: 'textarea'
-});
-
-/**
- * @aside guide forms
- *
- * Field is the base class for all form fields used in Sencha Touch. It provides a lot of shared functionality to all
- * field subclasses (for example labels, simple validation, {@link #clearIcon clearing} and tab index management), but
- * is rarely used directly. Instead, it is much more common to use one of the field subclasses:
- *
- *     xtype            Class
- *     ---------------------------------------
- *     textfield        {@link Ext.field.Text}
- *     numberfield      {@link Ext.field.Number}
- *     textareafield    {@link Ext.field.TextArea}
- *     hiddenfield      {@link Ext.field.Hidden}
- *     radiofield       {@link Ext.field.Radio}
- *     checkboxfield    {@link Ext.field.Checkbox}
- *     selectfield      {@link Ext.field.Select}
- *     togglefield      {@link Ext.field.Toggle}
- *     fieldset         {@link Ext.form.FieldSet}
- *
- * Fields are normally used within the context of a form and/or fieldset. See the {@link Ext.form.Panel FormPanel}
- * and {@link Ext.form.FieldSet FieldSet} docs for examples on how to put those together, or the list of links above
- * for usage of individual field types. If you wish to create your own Field subclasses you can extend this class,
- * though it is sometimes more useful to extend {@link Ext.field.Text} as this provides additional text entry
- * functionality.
- */
-Ext.define('Ext.field.Field', {
-    extend: 'Ext.Decorator',
-    alternateClassName: 'Ext.form.Field',
-    xtype: 'field',
-    requires: [
-        'Ext.field.Input'
-    ],
-
-    /**
-     * Set to true on all Ext.field.Field subclasses. This is used by {@link Ext.form.Panel#getValues} to determine which
-     * components inside a form are fields.
-     * @property isField
-     * @type Boolean
-     */
-    isField: true,
-
-    // @private
-    isFormField: true,
-
-    config: {
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        baseCls: Ext.baseCSSPrefix + 'field',
-
-        /**
-         * The label of this field
-         * @cfg {String} label
-         * @accessor
-         */
-        label: null,
-
-        /**
-         * @cfg {String} labelAlign The position to render the label relative to the field input.
-         * Available options are: 'top', 'left', 'bottom' and 'right'
-         * Defaults to 'left'
-         * @accessor
-         */
-        labelAlign: 'left',
-
-        /**
-         * @cfg {Number/String} labelWidth The width to make this field's label.
-         * @accessor
-         */
-        labelWidth: '30%',
-
-        /**
-         * @cfg {Boolean} labelWrap True to allow the label to wrap. If set to false, the label will be truncated with
-         * an ellipsis.
-         * @accessor
-         */
-        labelWrap: false,
-
-        /**
-         * @cfg {Boolean} clearIcon True to use a clear icon in this field
-         * @accessor
-         */
-        clearIcon: null,
-
-        /**
-         * @cfg {Boolean} required True to make this field required. Note: this only causes a visual indication.
-         * Doesn't prevent user from submitting the form.
-         * @accessor
-         */
-        required: false,
-
-        /**
-         * <p>The label Element associated with this Field. <b>Only available if a {@link #label} is specified.</b></p>
-<p>This has been deprecated.
-         * @type Ext.Element
-         * @property labelEl
-         * @deprecated 2.0
-         */
-
-        /**
-         * @cfg {String} inputType The type attribute for input fields -- e.g. radio, text, password, file (defaults
-         * to 'text'). The types 'file' and 'password' must be used to render those field types currently -- there are
-         * no separate Ext components for those.
-         * This is now deprecated. Please use 'input.type' instead.
-         * @deprecated 2.0
-         * @accessor
-         */
-        inputType: null,
-
-        /**
-         * @cfg {String} name The field's HTML name attribute.
-         * <b>Note</b>: this property must be set if this field is to be automatically included with
-         * {@link Ext.form.Panel#method-submit form submit()}.
-         * @accessor
-         */
-        name: null,
-
-        /**
-         * @cfg {Mixed} value A value to initialize this field with.
-         * @accessor
-         */
-        value: null,
-
-        /**
-         * @cfg {Number} tabIndex The tabIndex for this field. Note this only applies to fields that are rendered,
-         * not those which are built via applyTo.
-         * @accessor
-         */
-        tabIndex: null
-
-        /**
-         * @cfg {Object} component The inner component for this field.
-         */
-
-        /**
-         * @cfg {Boolean} fullscreen
-         * @hide
-         */
-    },
-
-    cachedConfig: {
-        /**
-         * @cfg {String} labelCls Optional CSS class to add to the Label element
-         * @accessor
-         */
-        labelCls: null,
-
-        /**
-         * @cfg {String} requiredCls The className to be applied to this Field when the {@link #required} configuration is set to true
-         * @accessor
-         */
-        requiredCls: Ext.baseCSSPrefix + 'field-required',
-
-        /**
-         * @cfg {String} inputCls CSS class to add to the input element of this fields {@link #component}
-         */
-        inputCls: null,
-
-        bubbleEvents: ['action']
-    },
-
-    /**
-     * @cfg {Boolean} isFocused
-     * True if this field is currently focused,
-     * @private
-     */
-
-    getElementConfig: function() {
-        var prefix = Ext.baseCSSPrefix;
-
-        return {
-            reference: 'element',
-            className: 'x-container',
-            children: [
-                {
-                    reference: 'label',
-                    cls: prefix + 'form-label',
-                    children: [{
-                        reference: 'labelspan',
-                        tag: 'span'
-                    }]
-                },
-                {
-                    reference: 'innerElement',
-                    cls: prefix + 'component-outer'
-                }
-            ]
-        };
-    },
-
-    // @private
-    updateLabel: function(newLabel, oldLabel) {
-        var renderElement = this.renderElement,
-            prefix = Ext.baseCSSPrefix;
-
-        if (newLabel) {
-            this.labelspan.setHtml(newLabel);
-            renderElement.addCls(prefix + 'field-labeled');
-        } else {
-            renderElement.removeCls(prefix + 'field-labeled');
-        }
-    },
-
-    // @private
-    updateLabelAlign: function(newLabelAlign, oldLabelAlign) {
-        var renderElement = this.renderElement,
-            prefix = Ext.baseCSSPrefix;
-
-        if (newLabelAlign) {
-            renderElement.addCls(prefix + 'label-align-' + newLabelAlign);
-
-            if (newLabelAlign == "top" || newLabelAlign == "bottom") {
-                this.label.setWidth('100%');
-            } else {
-                this.updateLabelWidth(this.getLabelWidth());
-            }
-        }
-
-        if (oldLabelAlign) {
-            renderElement.removeCls(prefix + 'label-align-' + oldLabelAlign);
-        }
-    },
-
-    // @private
-    updateLabelCls: function(newLabelCls, oldLabelCls) {
-        if (newLabelCls) {
-            this.label.addCls(newLabelCls);
-        }
-
-        if (oldLabelCls) {
-            this.label.removeCls(oldLabelCls);
-        }
-    },
-
-    // @private
-    updateLabelWidth: function(newLabelWidth) {
-        var labelAlign = this.getLabelAlign();
-
-        if (newLabelWidth) {
-            if (labelAlign == "top" || labelAlign == "bottom") {
-                this.label.setWidth('100%');
-            } else {
-                this.label.setWidth(newLabelWidth);
-            }
-        }
-    },
-
-    // @private
-    updateLabelWrap: function(newLabelWrap, oldLabelWrap) {
-        var cls = Ext.baseCSSPrefix + 'form-label-nowrap';
-
-        if (!newLabelWrap) {
-            this.addCls(cls);
-        } else {
-            this.removeCls(cls);
-        }
-    },
-
-    /**
-     * Updates the {@link #required} configuration
-     * @private
-     */
-    updateRequired: function(newRequired) {
-        this.renderElement[newRequired ? 'addCls' : 'removeCls'](this.getRequiredCls());
-    },
-
-    /**
-     * Updates the {@link #required} configuration
-     * @private
-     */
-    updateRequiredCls: function(newRequiredCls, oldRequiredCls) {
-        if (this.getRequired()) {
-            this.renderElement.replaceCls(oldRequiredCls, newRequiredCls);
-        }
-    },
-
-    // @private
-    initialize: function() {
-        var me = this;
-        me.callParent();
-
-        me.doInitValue();
-    },
-
-    /**
-     * @private
-     */
-    doInitValue: function() {
-        /**
-         * @property {Mixed} originalValue
-         * The original value of the field as configured in the {@link #value} configuration.
-         * setting is <code>true</code>.
-         */
-        this.originalValue = this.getInitialConfig().value;
-    },
-
-    /**
-     * Resets the current field value back to the original value on this field when it was created.
-     *
-     *     // This will create a field with an original value
-     *     var field = Ext.Viewport.add({
-     *         xtype: 'textfield',
-     *         value: 'first value'
-     *     });
-     *
-     *     // Update the value
-     *     field.setValue('new value');
-     *
-     *     // Now you can reset it back to the `first value`
-     *     field.reset();
-     *
-     * @return {Ext.field.Field} this
-     */
-    reset: function() {
-        this.setValue(this.originalValue);
-
-        return this;
-    },
-
-    /**
-     * <p>Returns true if the value of this Field has been changed from its {@link #originalValue}.
-     * Will return false if the field is disabled or has not been rendered yet.</p>
-     * @return {Boolean} True if this field has been changed from its original value (and
-     * is not disabled), false otherwise.
-     */
-    isDirty: function() {
-        return false;
-    }
-}, function() {
-});
-
-/**
- * @aside guide forms
- *
- * The text field is the basis for most of the input fields in Sencha Touch. It provides a baseline of shared
- * functionality such as input validation, standard events, state management and look and feel. Typically we create
- * text fields inside a form, like this:
- *
- *     @example
- *     Ext.create('Ext.form.Panel', {
- *         fullscreen: true,
- *         items: [
- *             {
- *                 xtype: 'fieldset',
- *                 title: 'Enter your name',
- *                 items: [
- *                     {
- *                         xtype: 'textfield',
- *                         label: 'First Name',
- *                         name: 'firstName'
- *                     },
- *                     {
- *                         xtype: 'textfield',
- *                         label: 'Last Name',
- *                         name: 'lastName'
- *                     }
- *                 ]
- *             }
- *         ]
- *     });
- *
- * This creates two text fields inside a form. Text Fields can also be created outside of a Form, like this:
- *
- *     Ext.create('Ext.field.Text', {
- *         label: 'Your Name',
- *         value: 'Ed Spencer'
- *     });
- *
- * ## Configuring
- *
- * Text field offers several configuration options, including {@link #placeHolder}, {@link #maxLength},
- * {@link #autoComplete}, {@link #autoCapitalize} and {@link #autoCorrect}. For example, here is how we would configure
- * a text field to have a maximum length of 10 characters, with placeholder text that disappears when the field is
- * focused:
- *
- *     Ext.create('Ext.field.Text', {
- *         label: 'Username',
- *         maxLength: 10,
- *         placeHolder: 'Enter your username'
- *     });
- *
- * The autoComplete, autoCapitalize and autoCorrect configs simply set those attributes on the text field and allow the
- * native browser to provide those capabilities. For example, to enable auto complete and auto correct, simply
- * configure your text field like this:
- *
- *     Ext.create('Ext.field.Text', {
- *         label: 'Username',
- *         autoComplete: true,
- *         autoCorrect: true
- *     });
- *
- * These configurations will be picked up by the native browser, which will enable the options at the OS level.
- *
- * Text field inherits from {@link Ext.field.Field}, which is the base class for all fields in Sencha Touch and provides
- * a lot of shared functionality for all fields, including setting values, clearing and basic validation. See the
- * {@link Ext.field.Field} documentation to see how to leverage its capabilities.
- */
-Ext.define('Ext.field.Text', {
-    extend: 'Ext.field.Field',
-    xtype: 'textfield',
-    alternateClassName: 'Ext.form.Text',
-
-    /**
-     * @event focus
-     * Fires when this field receives input focus
-     * @param {Ext.field.Text} this This field
-     * @param {Ext.event.Event} e
-     */
-
-    /**
-     * @event blur
-     * Fires when this field loses input focus
-     * @param {Ext.field.Text} this This field
-     * @param {Ext.event.Event} e
-     */
-
-    /**
-     * @event paste
-     * Fires when this field is pasted.
-     * @param {Ext.field.Text} this This field
-     * @param {Ext.event.Event} e
-     */
-
-    /**
-     * @event mousedown
-     * Fires when this field receives a mousedown
-     * @param {Ext.field.Text} this This field
-     * @param {Ext.event.Event} e
-     */
-
-    /**
-     * @event keyup
-     * @preventable doKeyUp
-     * Fires when a key is released on the input element
-     * @param {Ext.field.Text} this This field
-     * @param {Ext.event.Event} e
-     */
-
-    /**
-     * @event clearicontap
-     * @preventable doClearIconTap
-     * Fires when the clear icon is tapped
-     * @param {Ext.field.Text} this This field
-     * @param {Ext.event.Event} e
-     */
-
-    /**
-     * @event change
-     * Fires just before the field blurs if the field value has changed
-     * @param {Ext.field.Text} this This field
-     * @param {Mixed} newValue The new value
-     * @param {Mixed} oldValue The original value
-     */
-
-    /**
-     * @event action
-     * @preventable doAction
-     * Fires whenever the return key or go is pressed. FormPanel listeners
-     * for this event, and submits itself whenever it fires. Also note
-     * that this event bubbles up to parent containers.
-     * @param {Ext.field.Text} this This field
-     * @param {Mixed} e The key event object
-     */
-
-    config: {
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        ui: 'text',
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        clearIcon: true,
-
-        /**
-         * @cfg {String} placeHolder A string value displayed in the input (if supported) when the control is empty.
-         * @accessor
-         */
-        placeHolder: null,
-
-        /**
-         * @cfg {Number} maxLength The maximum number of permitted input characters.
-         * @accessor
-         */
-        maxLength: null,
-
-        /**
-         * True to set the field's DOM element autocomplete attribute to "on", false to set to "off".
-         * @cfg {Boolean} autoComplete
-         * @accessor
-         */
-        autoComplete: null,
-
-        /**
-         * True to set the field's DOM element autocapitalize attribute to "on", false to set to "off".
-         * @cfg {Boolean} autoCapitalize
-         * @accessor
-         */
-        autoCapitalize: null,
-
-        /**
-         * True to set the field DOM element autocorrect attribute to "on", false to set to "off".
-         * @cfg {Boolean} autoCorrect
-         * @accessor
-         */
-        autoCorrect: null,
-
-        /**
-         * True to set the field DOM element readonly attribute to true.
-         * @cfg {Boolean} readOnly
-         * @accessor
-         */
-        readOnly: null,
-
-        /**
-         * @cfg {Object} component The inner component for this field, which defaults to an input text.
-         * @accessor
-         */
-        component: {
-            xtype: 'input',
-            type : 'text'
-        }
-    },
-
-    // @private
-    initialize: function() {
-        var me = this;
-
-        me.callParent();
-
-        me.getComponent().on({
-            scope: this,
-
-            keyup       : 'onKeyUp',
-            change      : 'onChange',
-            focus       : 'onFocus',
-            blur        : 'onBlur',
-            paste       : 'onPaste',
-            mousedown   : 'onMouseDown',
-            clearicontap: 'onClearIconTap'
-        });
-
-        // set the originalValue of the textfield, if one exists
-        me.originalValue = me.originalValue || "";
-        me.getComponent().originalValue = me.originalValue;
-
-        me.syncEmptyCls();
-    },
-
-    syncEmptyCls: function() {
-        var empty = (this._value) ? this._value.length : false,
-            cls = Ext.baseCSSPrefix + 'empty';
-
-        if (empty) {
-            this.removeCls(cls);
-        } else {
-            this.addCls(cls);
-        }
-    },
-
-    // @private
-    updateValue: function(newValue) {
-        var component = this.getComponent();
-
-        if (component) {
-            component.setValue(newValue);
-        }
-
-        this[newValue ? 'showClearIcon' : 'hideClearIcon']();
-
-        this.syncEmptyCls();
-    },
-
-    getValue: function() {
-        var me = this;
-
-        me._value = me.getComponent().getValue();
-
-        me.syncEmptyCls();
-
-        return me._value;
-    },
-
-    // @private
-    updatePlaceHolder: function(newPlaceHolder) {
-        this.getComponent().setPlaceHolder(newPlaceHolder);
-    },
-
-    // @private
-    updateMaxLength: function(newMaxLength) {
-        this.getComponent().setMaxLength(newMaxLength);
-    },
-
-    // @private
-    updateAutoComplete: function(newAutoComplete) {
-        this.getComponent().setAutoComplete(newAutoComplete);
-    },
-
-    // @private
-    updateAutoCapitalize: function(newAutoCapitalize) {
-        this.getComponent().setAutoCapitalize(newAutoCapitalize);
-    },
-
-    // @private
-    updateAutoCorrect: function(newAutoCorrect) {
-        this.getComponent().setAutoCorrect(newAutoCorrect);
-    },
-
-    // @private
-    updateReadOnly: function(newReadOnly) {
-        if (newReadOnly) {
-            this.hideClearIcon();
-        } else {
-            this.showClearIcon();
-        }
-
-        this.getComponent().setReadOnly(newReadOnly);
-    },
-
-    // @private
-    updateInputType: function(newInputType) {
-        var component = this.getComponent();
-        if (component) {
-            component.setType(newInputType);
-        }
-    },
-
-    // @private
-    updateName: function(newName) {
-        var component = this.getComponent();
-        if (component) {
-            component.setName(newName);
-        }
-    },
-
-    // @private
-    updateTabIndex: function(newTabIndex) {
-        var component = this.getComponent();
-        if (component) {
-            component.setTabIndex(newTabIndex);
-        }
-    },
-
-    /**
-     * Updates the {@link #inputCls} configuration on this fields {@link #component}
-     * @private
-     */
-    updateInputCls: function(newInputCls, oldInputCls) {
-        var component = this.getComponent();
-        if (component) {
-            component.replaceCls(oldInputCls, newInputCls);
-        }
-    },
-
-    doSetDisabled: function(disabled) {
-        var me = this;
-
-        me.callParent(arguments);
-
-        var component = me.getComponent();
-        if (component) {
-            component.setDisabled(disabled);
-        }
-
-        if (disabled) {
-            me.hideClearIcon();
-        } else {
-            me.showClearIcon();
-        }
-    },
-
-    // @private
-    showClearIcon: function() {
-        var me = this;
-
-        if (!me.getDisabled() && !me.getReadOnly() && me.getValue() && me.getClearIcon()) {
-            me.element.addCls(Ext.baseCSSPrefix + 'field-clearable');
-        }
-
-        return me;
-    },
-
-    // @private
-    hideClearIcon: function() {
-        if (this.getClearIcon()) {
-            this.element.removeCls(Ext.baseCSSPrefix + 'field-clearable');
-        }
-    },
-
-    onKeyUp: function(e) {
-        this.fireAction('keyup', [this, e], 'doKeyUp');
-    },
-
-    /**
-     * Called when a key has been pressed in the `<input>`
-     * @private
-     */
-    doKeyUp: function(me, e) {
-        // getValue to ensure that we are in sync with the dom
-        var value = me.getValue();
-
-        // show the {@link #clearIcon} if it is being used
-        me[value ? 'showClearIcon' : 'hideClearIcon']();
-
-        if (e.browserEvent.keyCode === 13) {
-            me.fireAction('action', [me, e], 'doAction');
-        }
-    },
-
-    doAction: function() {
-        this.blur();
-    },
-
-    onClearIconTap: function(e) {
-        this.fireAction('clearicontap', [this, e], 'doClearIconTap');
-    },
-
-    // @private
-    doClearIconTap: function(me, e) {
-        me.setValue('');
-
-        //sync with the input
-        me.getValue();
-    },
-
-    onChange: function(me, value, startValue) {
-        me.fireEvent('change', this, value, startValue);
-    },
-
-    onFocus: function(e) {
-        this.isFocused = true;
-        this.fireEvent('focus', this, e);
-    },
-
-    onBlur: function(e) {
-        var me = this;
-
-        this.isFocused = false;
-
-        me.fireEvent('blur', me, e);
-
-        setTimeout(function() {
-            me.isFocused = false;
-        }, 50);
-    },
-
-    onPaste: function(e) {
-        this.fireEvent('paste', this, e);
-    },
-
-    onMouseDown: function(e) {
-        this.fireEvent('mousedown', this, e);
-    },
-
-    /**
-     * Attempts to set the field as the active input focus.
-     * @return {Ext.field.Text} This field
-     */
-    focus: function() {
-        this.getComponent().focus();
-        return this;
-    },
-
-    /**
-     * Attempts to forcefully blur input focus for the field.
-     * @return {Ext.field.Text} This field
-     */
-    blur: function() {
-        this.getComponent().blur();
-        return this;
-    },
-
-    /**
-     * Attempts to forcefully select all the contents of the input field.
-     * @return {Ext.field.Text} this
-     */
-    select: function() {
-        this.getComponent().select();
-        return this;
-    },
-
-    reset: function() {
-        this.getComponent().reset();
-
-        //we need to call this to sync the input with this field
-        this.getValue();
-
-        this[this._value ? 'showClearIcon' : 'hideClearIcon']();
-    },
-
-    isDirty: function() {
-        var component = this.getComponent();
-        if (component) {
-            return component.isDirty();
-        }
-        return false;
-    }
-});
-
-
-/**
- * @aside guide forms
- *
- * Creates an HTML textarea field on the page. This is useful whenever you need the user to enter large amounts of text
- * (i.e. more than a few words). Typically, text entry on mobile devices is not a pleasant experience for the user so
- * it's good to limit your use of text areas to only those occasions when freeform text is required or alternative
- * input methods like select boxes or radio buttons are not possible. Text Areas are usually created inside forms, like
- * this:
- *
- *     @example
- *     Ext.create('Ext.form.Panel', {
- *         fullscreen: true,
- *         items: [
- *             {
- *                 xtype: 'fieldset',
- *                 title: 'About you',
- *                 items: [
- *                     {
- *                         xtype: 'textfield',
- *                         label: 'Name',
- *                         name: 'name'
- *                     },
- *                     {
- *                         xtype: 'textareafield',
- *                         label: 'Bio',
- *                         maxRows: 4,
- *                         name: 'bio'
- *                     }
- *                 ]
- *             }
- *         ]
- *     });
- *
- * In the example above we're creating a form with a {@link Ext.field.Text text field} for the user's name and a text
- * area for their bio. We used the {@link #maxRows} configuration on the text area to tell it to grow to a maximum of 4
- * rows of text before it starts using a scroll bar inside the text area to scroll the text.
- *
- * We can also create a text area outside the context of a form, like this:
- *
- * This creates two text fields inside a form. Text Fields can also be created outside of a Form, like this:
- *
- *     Ext.create('Ext.field.TextArea', {
- *         label: 'About You',
- *         {@link #placeHolder}: 'Tell us about yourself...'
- *     });
- */
-Ext.define('Ext.field.TextArea', {
-    extend: 'Ext.field.Text',
-    xtype: 'textareafield',
-    requires: ['Ext.field.TextAreaInput'],
-    alternateClassName: 'Ext.form.TextArea',
-
-    config: {
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        ui: 'textarea',
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        autoCapitalize: false,
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        component: {
-            xtype: 'textareainput'
-        },
-
-        /**
-         * @cfg {Number} maxRows The maximum number of lines made visible by the input.
-         * @accessor
-         */
-        maxRows: null
-    },
-
-    // @private
-    updateMaxRows: function(newRows) {
-        this.getComponent().setMaxRows(newRows);
-    },
-
-    doSetHeight: function(newHeight) {
-        this.callParent(arguments);
-        var component = this.getComponent();
-        component.input.setHeight(newHeight);
-    },
-
-    doSetWidth: function(newWidth) {
-        this.callParent(arguments);
-        var component = this.getComponent();
-        component.input.setWidth(newWidth);
-    },
-
-    /**
-     * Called when a key has been pressed in the `<input>`
-     * @private
-     */
-    doKeyUp: function(me) {
-        // getValue to ensure that we are in sync with the dom
-        var value = me.getValue();
-
-        // show the {@link #clearIcon} if it is being used
-        me[value ? 'showClearIcon' : 'hideClearIcon']();
-    }
-});
-
-/**
- * Utility class for generating different styles of message boxes. The framework provides a global singleton
- * {@link Ext.Msg} for common usage which you should use in most cases.
- *
- * If you want to use {@link Ext.MessageBox} directly, just think of it as a modal {@link Ext.Container}.
- *
- * Note that the MessageBox is asynchronous. Unlike a regular JavaScript `alert` (which will halt browser execution),
- * showing a MessageBox will not cause the code to stop. For this reason, if you have code that should only run _after_
- * some user feedback from the MessageBox, you must use a callback function (see the `fn` configuration option parameter
- * for the {@link #method-show show} method for more details).
- *
- *     @example preview
- *     Ext.Msg.alert('Title', 'The quick brown fox jumped over the lazy dog.', Ext.emptyFn);
- *
- * Checkout {@link Ext.Msg} for more examples.
- *
- */
-Ext.define('Ext.MessageBox', {
-    extend  : 'Ext.Sheet',
-    requires: [
-        'Ext.Toolbar',
-        'Ext.field.Text',
-        'Ext.field.TextArea'
-    ],
-
-    config: {
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        ui: 'dark',
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        baseCls: Ext.baseCSSPrefix + 'msgbox',
-
-        /**
-         * @cfg {String} iconCls
-         * CSS class for the icon. The icon should be 40px x 40px.
-         * @accessor
-         */
-        iconCls: null,
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        showAnimation: {
-            type: 'popIn',
-            duration: 250,
-            easing: 'ease-out'
-        },
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        hideAnimation: {
-            type: 'popOut',
-            duration: 250,
-            easing: 'ease-out'
-        },
-
-        /**
-         * Override the default zIndex so it is normally always above floating components.
-         */
-        zIndex: 10,
-
-        /**
-         * @cfg {Number} defaultTextHeight
-         * The default height in pixels of the message box's multiline textarea if displayed.
-         * @accessor
-         */
-        defaultTextHeight: 75,
-
-        /**
-         * @cfg {String} title
-         * The title of this {@link Ext.MessageBox}.
-         * @accessor
-         */
-        title: null,
-
-        /**
-         * @cfg {Array/Object} buttons
-         * An array of buttons, or an object of a button to be displayed in the toolbar of this {@link Ext.MessageBox}.
-         */
-        buttons: null,
-
-        /**
-         * @cfg {String} message
-         * The message to be displayed in the {@link Ext.MessageBox}.
-         * @accessor
-         */
-        message: null,
-
-        /**
-         * @cfg {String} msg
-         * The message to be displayed in the {@link Ext.MessageBox}.
-         * @removed 2.0.0 Please use {@link #message} instead.
-         */
-
-        /**
-         * @cfg {Object} prompt
-         * The configuration to be passed if you want an {@link Ext.field.Text} or {@link Ext.field.TextArea} field
-         * in your {@link Ext.MessageBox}.
-         *
-         * Pass an object with the property "multiline" with a value of true, if you want the prompt to use a TextArea.
-         *
-         * Alternatively, you can just pass in an object which has an xtype/xclass of another component.
-         *
-         *     prompt: {
-         *         xtype: 'textarea',
-         *         value: 'test'
-         *     }
-         *
-         * @accessor
-         */
-        prompt: null,
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        layout: {
-            type: 'vbox',
-            pack: 'center'
-        }
-    },
-
-    statics: {
-        OK    : {text: 'OK',     itemId: 'ok',  ui: 'action'},
-        YES   : {text: 'Yes',    itemId: 'yes', ui: 'action'},
-        NO    : {text: 'No',     itemId: 'no'},
-        CANCEL: {text: 'Cancel', itemId: 'cancel'},
-
-        INFO    : Ext.baseCSSPrefix + 'msgbox-info',
-        WARNING : Ext.baseCSSPrefix + 'msgbox-warning',
-        QUESTION: Ext.baseCSSPrefix + 'msgbox-question',
-        ERROR   : Ext.baseCSSPrefix + 'msgbox-error',
-
-        OKCANCEL: [
-            {text: 'Cancel', itemId: 'cancel'},
-            {text: 'OK',     itemId: 'ok',  ui : 'action'}
-        ],
-        YESNOCANCEL: [
-            {text: 'Cancel', itemId: 'cancel'},
-            {text: 'No',     itemId: 'no'},
-            {text: 'Yes',    itemId: 'yes', ui: 'action'}
-        ],
-        YESNO: [
-            {text: 'No',  itemId: 'no'},
-            {text: 'Yes', itemId: 'yes', ui: 'action'}
-        ]
-    },
-
-    constructor: function(config) {
-        config = config || {};
-
-        if (config.hasOwnProperty('promptConfig')) {
-
-            Ext.applyIf(config, {
-                prompt: config.promptConfig
-            });
-
-            delete config.promptConfig;
-        }
-
-        if (config.hasOwnProperty('multiline') || config.hasOwnProperty('multiLine')) {
-            config.prompt = config.prompt || {};
-            Ext.applyIf(config.prompt, {
-                multiLine: config.multiline || config.multiLine
-            });
-
-            delete config.multiline;
-            delete config.multiLine;
-        }
-
-        this.defaultAllowedConfig = {};
-        var allowedConfigs = ['ui', 'showAnimation', 'hideAnimation', 'title', 'message', 'prompt', 'iconCls', 'buttons', 'defaultTextHeight'],
-            ln = allowedConfigs.length,
-            i, allowedConfig;
-
-        for (i = 0; i < ln; i++) {
-            allowedConfig = allowedConfigs[i];
-            this.defaultAllowedConfig[allowedConfig] = this.defaultConfig[allowedConfig];
-        }
-
-        this.callParent([config]);
-    },
-
-    /**
-     * Creates a new {@link Ext.Toolbar} instance using {@link Ext#factory}
-     * @private
-     */
-    applyTitle: function(config) {
-        if (typeof config == "string") {
-            config = {
-                title: config
-            };
-        }
-
-        Ext.applyIf(config, {
-            docked: 'top',
-            cls   : this.getBaseCls() + '-title'
-        });
-
-        return Ext.factory(config, Ext.Toolbar, this.getTitle());
-    },
-
-    /**
-     * Adds the new {@link Ext.Toolbar} instance into this container
-     * @private
-     */
-    updateTitle: function(newTitle) {
-        if (newTitle) {
-            this.add(newTitle);
-        }
-    },
-
-    /**
-     * Adds the new {@link Ext.Toolbar} instance into this container
-     * @private
-     */
-    updateButtons: function(newButtons) {
-        var me = this;
-
-        if (newButtons) {
-            if (me.buttonsToolbar) {
-                me.buttonsToolbar.removeAll();
-                me.buttonsToolbar.setItems(newButtons);
-            } else {
-                me.buttonsToolbar = Ext.create('Ext.Toolbar', {
-                    docked     : 'bottom',
-                    defaultType: 'button',
-                    layout     : {
-                        type: 'hbox',
-                        pack: 'center'
-                    },
-                    ui         : me.getUi(),
-                    cls        : me.getBaseCls() + '-buttons',
-                    items      : newButtons
-                });
-
-                me.add(me.buttonsToolbar);
-            }
-        }
-    },
-
-    /**
-     * @private
-     */
-    applyMessage: function(config) {
-        config = {
-            html : config,
-            cls  : this.getBaseCls() + '-text'
-        };
-
-        return Ext.factory(config, Ext.Component, this._message);
-    },
-
-    /**
-     * @private
-     */
-    updateMessage: function(newMessage) {
-        if (newMessage) {
-            this.add(newMessage);
-        }
-    },
-
-    getMessage: function() {
-        if (this._message) {
-            return this._message.getHtml();
-        }
-
-        return null;
-    },
-
-    /**
-     * @private
-     */
-    applyIconCls: function(config) {
-        config = {
-            xtype : 'component',
-            docked: 'left',
-            width : 40,
-            height: 40,
-            baseCls: Ext.baseCSSPrefix + 'icon',
-            hidden: (config) ? false : true,
-            cls: config
-        };
-
-        return Ext.factory(config, Ext.Component, this._iconCls);
-    },
-
-    /**
-     * @private
-     */
-    updateIconCls: function(newIconCls, oldIconCls) {
-        var me = this;
-
-        //ensure the title and btuton elements are added first
-        this.getTitle();
-        this.getButtons();
-
-        if (newIconCls && !oldIconCls) {
-            this.add(newIconCls);
-        } else {
-            this.remove(oldIconCls);
-        }
-    },
-
-    getIconCls: function() {
-        var icon = this._iconCls,
-            iconCls;
-
-        if (icon) {
-            iconCls = icon.getCls();
-            return (iconCls) ? iconCls[0] : null;
-        }
-
-        return null;
-    },
-
-    /**
-     * @private
-     */
-    applyPrompt: function(prompt) {
-        if (prompt) {
-            var config = {
-                label: false
-            };
-
-            if (Ext.isObject(prompt)) {
-                Ext.apply(config, prompt);
-            }
-
-            if (config.multiLine) {
-                config.height = Ext.isNumber(config.multiLine) ? parseFloat(config.multiLine) : this.getDefaultTextHeight();
-                return Ext.factory(config, Ext.field.TextArea, this.getPrompt());
-            } else {
-                return Ext.factory(config, Ext.field.Text, this.getPrompt());
-            }
-        }
-
-        return prompt;
-    },
-
-    /**
-     * @private
-     */
-    updatePrompt: function(newPrompt, oldPrompt) {
-        if (newPrompt) {
-            this.add(newPrompt);
-        }
-
-        if (oldPrompt) {
-            this.remove(oldPrompt);
-        }
-    },
-
-    // @private
-    // pass `fn` config to show method instead
-    onClick: function(button) {
-        if (button) {
-            var config = button.config.userConfig || {},
-                initialConfig = button.getInitialConfig(),
-                prompt = this.getPrompt();
-
-            if (typeof config.fn == 'function') {
-                this.on({
-                    hiddenchange: function() {
-                        config.fn.call(
-                            config.scope || null,
-                            initialConfig.itemId || initialConfig.text,
-                            prompt ? prompt.getValue() : null,
-                            config
-                        );
-                    },
-                    single: true,
-                    scope: this
-                });
-            }
-
-            if (config.input) {
-                config.input.dom.blur();
-            }
-        }
-
-        this.hide();
-    },
-
-    /**
-     * Displays the {@link Ext.MessageBox} with a specified configuration. All
-     * display functions (e.g. {@link #method-prompt}, {@link #alert}, {@link #confirm})
-     * on MessageBox call this function internally, although those calls
-     * are basic shortcuts and do not support all of the config options allowed here.
-     *
-     * Example usage:
-     *
-     *     Ext.Msg.show({
-     *        title: 'Address',
-     *        message: 'Please enter your address:',
-     *        width: 300,
-     *        buttons: Ext.MessageBox.OKCANCEL,
-     *        multiLine: true,
-     *        prompt : { maxlength : 180, autocapitalize : true },
-     *        fn: function(buttonId) {
-     *            console.log('You pressed the "' + buttonId + '" button.');
-     *        }
-     *     });
-     *
-     * @param {Object} config An object with the following config options:
-     *
-     * @param {Object/Array} config.buttons
-     * A button config object or Array of the same(e.g., `Ext.MessageBox.OKCANCEL` or `{text:'Foo', itemId:'cancel'}`),
-     * or false to not show any buttons.
-     *
-     * Defaults to: `false`
-     *
-     * @param {String} config.cls
-     * A custom CSS class to apply to the message box's container element.
-     *
-     * @param {Function} config.fn
-     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
-     *
-     * @param {String} config.fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
-     * @param {String} config.fn.value Value of the input field if either `prompt` or `multiline` option is true.
-     * @param {Object} config.fn.opt The config object passed to show.
-     *
-     * @param {Number} config.width
-     * A fixed width for the MessageBox.
-     *
-     * Defaults to: `auto`
-     *
-     * @param {Number} config.height
-     * A fixed height for the MessageBox.
-     *
-     * Defaults to: `auto`
-     *
-     * @param {Object} config.scope
-     * The scope of the callback function
-     *
-     * @param {String} config.icon
-     * A CSS class that provides a background image to be used as the body icon for the dialog
-     * (e.g. Ext.MessageBox.WARNING or 'custom-class').
-     *
-     * @param {Boolean} config.modal
-     * False to allow user interaction with the page while the message box is displayed.
-     *
-     * Defaults to: `true`
-     *
-     * @param {String} config.message
-     * A string that will replace the existing message box body text.
-     * Defaults to the XHTML-compliant non-breaking space character `&#160;`.
-     *
-     * @param {Number} config.defaultTextHeight
-     * The default height in pixels of the message box's multiline textarea if displayed.
-     *
-     * Defaults to: `75`
-     *
-     * @param {Boolean} config.prompt
-     * True to prompt the user to enter single-line text. Please view the {@link Ext.MessageBox#method-prompt} documentation in {@link Ext.MessageBox}.
-     * for more information.
-     *
-     * Defaults to: `false`
-     *
-     * @param {Boolean} config.multiline
-     * True to prompt the user to enter multi-line text.
-     *
-     * Defaults to: `false`
-     *
-     * @param {String} config.title
-     * The title text.
-     *
-     * @param {String} config.value
-     * The string value to set into the active textbox element if displayed.
-     *
-     * @return {Ext.MessageBox} this
-     */
-    show: function(initialConfig) {
-        //if it has not been added to a container, add it to the Viewport.
-        if (!this.getParent() && Ext.Viewport) {
-            Ext.Viewport.add(this);
-        }
-
-        if (!initialConfig) {
-            return this.callParent();
-        }
-
-        var config = Ext.Object.merge({}, {
-            value: ''
-        }, initialConfig);
-
-        var buttons        = initialConfig.buttons || Ext.MessageBox.OK || [],
-            buttonBarItems = [],
-            userConfig     = initialConfig;
-
-        Ext.each(buttons, function(buttonConfig) {
-            if (!buttonConfig) {
-                return;
-            }
-
-            buttonBarItems.push(Ext.apply({
-                userConfig: userConfig,
-                scope     : this,
-                handler   : 'onClick'
-            }, buttonConfig));
-        }, this);
-
-        config.buttons = buttonBarItems;
-
-        if (config.promptConfig) {
-        }
-        config.prompt = (config.promptConfig || config.prompt) || null;
-
-        if (config.multiLine) {
-            config.prompt = config.prompt || {};
-            config.prompt.multiLine = config.multiLine;
-            delete config.multiLine;
-        }
-
-        config = Ext.merge({}, this.defaultAllowedConfig, config);
-
-        this.setConfig(config);
-
-        var prompt = this.getPrompt();
-        if (prompt) {
-            prompt.setValue(initialConfig.value || '');
-        }
-
-        this.callParent();
-
-        return this;
-    },
-
-    /**
-     * Displays a standard read-only message box with an OK button (comparable to the basic JavaScript alert prompt). If
-     * a callback function is passed it will be called after the user clicks the button, and the itemId of the button
-     * that was clicked will be passed as the only parameter to the callback.
-     *
-     * @param {String} title The title bar text
-     *
-     * @param {String} message The message box body text
-     *
-     * @param {Function} fn
-     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
-     *
-     * @param {String} fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
-     * @param {String} fn.value Value of the input field if either `prompt` or `multiline` option is true.
-     * @param {Object} fn.opt The config object passed to show.
-     *
-     * @param {Object} scope The scope (`this` reference) in which the callback is executed.
-     * Defaults to: the browser window
-     *
-     * @return {Ext.MessageBox} this
-     */
-    alert: function(title, message, fn, scope) {
-        return this.show({
-            title       : title,
-            message     : message,
-            buttons     : Ext.MessageBox.OK,
-            promptConfig: false,
-            fn          : function() {
-                if (fn) {
-                    fn.apply(scope, arguments);
-                }
-            },
-            scope: scope
-        });
-    },
-
-    /**
-     * Displays a confirmation message box with Yes and No buttons (comparable to JavaScript's confirm). If a callback
-     * function is passed it will be called after the user clicks either button, and the id of the button that was
-     * clicked will be passed as the only parameter to the callback (could also be the top-right close button).
-     *
-     * @param {String} title The title bar text
-     *
-     * @param {String} message The message box body text
-     *
-     * @param {Function} fn
-     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
-     *
-     * @param {String} fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
-     * @param {String} fn.value Value of the input field if either `prompt` or `multiline` option is true.
-     * @param {Object} fn.opt The config object passed to show.
-     *
-     * @param {Object} scope The scope (`this` reference) in which the callback is executed.
-     *
-     * Defaults to: the browser window
-     *
-     * @return {Ext.MessageBox} this
-     */
-    confirm: function(title, message, fn, scope) {
-        return this.show({
-            title       : title,
-            message     : message,
-            buttons     : Ext.MessageBox.YESNO,
-            promptConfig: false,
-            scope       : scope,
-            fn: function() {
-                if (fn) {
-                    fn.apply(scope, arguments);
-                }
-            }
-        });
-    },
-
-    /**
-     * Displays a message box with OK and Cancel buttons prompting the user to enter some text (comparable to
-     * JavaScript's prompt). The prompt can be a single-line or multi-line textbox. If a callback function is passed it
-     * will be called after the user clicks either button, and the id of the button that was clicked (could also be the
-     * top-right close button) and the text that was entered will be passed as the two parameters to the callback.
-     *
-     * Example usage:
-     *
-     *     Ext.Msg.prompt(
-     *         'Welcome!',
-     *         'What\'s your name going to be today?',
-     *         function (buttonId, value) {
-     *             console.log(value)
-     *         },
-     *         null,
-     *         false,
-     *         null,
-     *         { autoCapitalize : true, placeHolder : 'First-name please...' }
-     *     );
-     *
-     * @param {String} title The title bar text
-     *
-     * @param {String} message The message box body text
-     *
-     * @param {Function} fn
-     * A callback function which is called when the dialog is dismissed by clicking on the configured buttons.
-     *
-     * @param {String} fn.buttonId The itemId of the button pressed, one of: 'ok', 'yes', 'no', 'cancel'.
-     * @param {String} fn.value Value of the input field if either `prompt` or `multiline` option is true.
-     * @param {Object} fn.opt The config object passed to show.
-     *
-     * @param {Object} scope The scope (`this` reference) in which the callback is executed.
-     *
-     * Defaults to: the browser window.
-     *
-     * @param {Boolean/Number} multiLine True to create a multiline textbox using the defaultTextHeight property,
-     * or the height in pixels to create the textbox.
-     *
-     * Defaults to: `false`
-     *
-     * @param {String} value Default value of the text input element.
-     *
-     * @param {Object} prompt
-     * The configuration for the prompt. See the {@link Ext.MessageBox#cfg-prompt prompt} documentation in {@link Ext.MessageBox}
-     * for more information.
-     *
-     * Defaults to: `true`
-     *
-     * @return {Ext.MessageBox} this
-     */
-    prompt: function(title, message, fn, scope, multiLine, value, prompt) {
-        return this.show({
-            title    : title,
-            message  : message,
-            buttons  : Ext.MessageBox.OKCANCEL,
-            scope    : scope,
-            prompt   : prompt || true,
-            multiLine: multiLine,
-            value    : value,
-            fn: function() {
-                if (fn) {
-                    fn.apply(scope, arguments);
-                }
-            }
-        });
-    }
-}, function(MessageBox) {
-
-    Ext.onSetup(function() {
-        /**
-         * @class Ext.Msg
-         * @extends Ext.MessageBox
-         * @singleton
-         *
-         * A global shared singleton instance of the {@link Ext.MessageBox} class.
-         *
-         * Allows for simple creation of various different alerts and notifications.
-         *
-         * To change any cofigurations on this singleton instance, you must change the
-         * defaultAllowedConfig object.  For example to remove all animations on Msg:
-         *
-         * Ext.Msg.defaultAllowedConfig.showAnimation = false;
-         * Ext.Msg.defaultAllowedConfig.hideAnimation = false;
-         *
-         * ## Examples
-         *
-         * ### Alert
-         * Use the {@link #alert} method to show a basic alert:
-         *
-         *     @example preview
-         *     Ext.Msg.alert('Title', 'The quick brown fox jumped over the lazy dog.', Ext.emptyFn);
-         *
-         * ### Prompt
-         * Use the {@link #method-prompt} method to show an alert which has a textfield:
-         *
-         *     @example preview
-         *     Ext.Msg.prompt('Name', 'Please enter your name:', function(text) {
-         *         // process text value and close...
-         *     });
-         *
-         * ### Confirm
-         * Use the {@link #confirm} method to show a confirmation alert (shows yes and no buttons).
-         *
-         *     @example preview
-         *     Ext.Msg.confirm("Confirmation", "Are you sure you want to do that?", Ext.emptyFn);
-         */
-        Ext.Msg = new MessageBox;
-    });
-});
-
-
-/**
- * @author Tommy Maintz
- *
- * This class generates UUID's according to RFC 4122. This class has a default id property.
- * This means that a single instance is shared unless the id property is overridden. Thus,
- * two {@link Ext.data.Model} instances configured like the following share one generator:
- *
- *     Ext.define('MyApp.data.MyModelX', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             identifier: 'uuid'
- *         }
- *     });
- *
- *     Ext.define('MyApp.data.MyModelY', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             identifier: 'uuid'
- *         }
- *     });
- *
- * This allows all models using this class to share a commonly configured instance.
- *
- * # Using Version 1 ("Sequential") UUID's
- *
- * If a server can provide a proper timestamp and a "cryptographic quality random number"
- * (as described in RFC 4122), the shared instance can be configured as follows:
- *
- *     Ext.data.identifier.Uuid.Global.reconfigure({
- *         version: 1,
- *         clockSeq: clock, // 14 random bits
- *         salt: salt,      // 48 secure random bits (the Node field)
- *         timestamp: ts    // timestamp per Section 4.1.4
- *     });
- *
- *     // or these values can be split into 32-bit chunks:
- *
- *     Ext.data.identifier.Uuid.Global.reconfigure({
- *         version: 1,
- *         clockSeq: clock,
- *         salt: { lo: saltLow32, hi: saltHigh32 },
- *         timestamp: { lo: timestampLow32, hi: timestamptHigh32 }
- *     });
- *
- * This approach improves the generator's uniqueness by providing a valid timestamp and
- * higher quality random data. Version 1 UUID's should not be used unless this information
- * can be provided by a server and care should be taken to avoid caching of this data.
- *
- * See http://www.ietf.org/rfc/rfc4122.txt for details.
- */
-Ext.define('Ext.data.identifier.Uuid', {
-    extend: 'Ext.data.identifier.Simple',
-
-    alias: 'data.identifier.uuid',
-
-    isUnique: true,
-
-    config: {
-        /**
-         * The id for this generator instance. By default all model instances share the same
-         * UUID generator instance. By specifying an id other then 'uuid', a unique generator instance
-         * will be created for the Model.
-         */
-        id: undefined,
-
-        /**
-         * @property {Number/Object} salt
-         * When created, this value is a 48-bit number. For computation, this value is split
-         * into 32-bit parts and stored in an object with `hi` and `lo` properties.
-         */
-        salt: null,
-
-        /**
-         * @property {Number/Object} timestamp
-         * When created, this value is a 60-bit number. For computation, this value is split
-         * into 32-bit parts and stored in an object with `hi` and `lo` properties.
-         */
-        timestamp: null,
-
-        /**
-         * @cfg {Number} version
-         * The Version of UUID. Supported values are:
-         *
-         *  * 1 : Time-based, "sequential" UUID.
-         *  * 4 : Pseudo-random UUID.
-         *
-         * The default is 4.
-         */
-        version: 4
-    },
-
-    applyId: function(id) {
-        if (id === undefined) {
-            return Ext.data.identifier.Uuid.Global;
-        }
-        return id;
-    },
-
-    constructor: function() {
-        var me = this;
-        me.callParent(arguments);
-        me.parts = [];
-        me.init();
-    },
-
-    /**
-     * Reconfigures this generator given new config properties.
-     */
-    reconfigure: function(config) {
-        this.setConfig(config);
-        this.init();
-    },
-
-    generate: function () {
-        var me = this,
-            parts = me.parts,
-            version = me.getVersion(),
-            salt = me.getSalt(),
-            time = me.getTimestamp();
-
-        /*
-           The magic decoder ring (derived from RFC 4122 Section 4.2.2):
-
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |                          time_low                             |
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |           time_mid            |  ver  |        time_hi        |
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |res|  clock_hi |   clock_low   |    salt 0   |M|     salt 1    |
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |                         salt (2-5)                            |
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-                     time_mid      clock_hi (low 6 bits)
-            time_low     | time_hi |clock_lo
-                |        |     |   || salt[0]
-                |        |     |   ||   | salt[1..5]
-                v        v     v   vv   v v
-                0badf00d-aced-1def-b123-dfad0badbeef
-                              ^    ^     ^
-                        version    |     multicast (low bit)
-                                   |
-                                reserved (upper 2 bits)
-        */
-        parts[0] = me.toHex(time.lo, 8);
-        parts[1] = me.toHex(time.hi & 0xFFFF, 4);
-        parts[2] = me.toHex(((time.hi >>> 16) & 0xFFF) | (version << 12), 4);
-        parts[3] = me.toHex(0x80 | ((me.clockSeq >>> 8) & 0x3F), 2) +
-                   me.toHex(me.clockSeq & 0xFF, 2);
-        parts[4] = me.toHex(salt.hi, 4) + me.toHex(salt.lo, 8);
-
-        if (version == 4) {
-            me.init(); // just regenerate all the random values...
-        } else {
-            // sequentially increment the timestamp...
-            ++time.lo;
-            if (time.lo >= me.twoPow32) { // if (overflow)
-                time.lo = 0;
-                ++time.hi;
-            }
-        }
-
-        return parts.join('-').toLowerCase();
-    },
-
-    /**
-     * @private
-     */
-    init: function () {
-        var me = this,
-            salt = me.getSalt(),
-            time = me.getTimestamp();
-
-        if (me.getVersion() == 4) {
-            // See RFC 4122 (Secion 4.4)
-            //   o  If the state was unavailable (e.g., non-existent or corrupted),
-            //      or the saved node ID is different than the current node ID,
-            //      generate a random clock sequence value.
-            me.clockSeq = me.rand(0, me.twoPow14-1);
-
-            if (!salt) {
-                salt = {};
-                me.setSalt(salt);
-            }
-
-            if (!time) {
-                time = {};
-                me.setTimestamp(time);
-            }
-
-            // See RFC 4122 (Secion 4.4)
-            salt.lo = me.rand(0, me.twoPow32-1);
-            salt.hi = me.rand(0, me.twoPow16-1);
-            time.lo = me.rand(0, me.twoPow32-1);
-            time.hi = me.rand(0, me.twoPow28-1);
-        } else {
-            // this is run only once per-instance
-            me.setSalt(me.split(me.getSalt()));
-            me.setTimestamp(me.split(me.getTimestamp()));
-
-            // Set multicast bit: "the least significant bit of the first octet of the
-            // node ID" (nodeId = salt for this implementation):
-            me.getSalt().hi |= 0x100;
-        }
-    },
-
-    /**
-     * Some private values used in methods on this class.
-     * @private
-     */
-    twoPow14: Math.pow(2, 14),
-    twoPow16: Math.pow(2, 16),
-    twoPow28: Math.pow(2, 28),
-    twoPow32: Math.pow(2, 32),
-
-    /**
-     * Converts a value into a hexadecimal value. Also allows for a maximum length
-     * of the returned value.
-     * @param value
-     * @param length
-     * @private
-     */
-    toHex: function(value, length) {
-        var ret = value.toString(16);
-        if (ret.length > length) {
-            ret = ret.substring(ret.length - length); // right-most digits
-        } else if (ret.length < length) {
-            ret = Ext.String.leftPad(ret, length, '0');
-        }
-        return ret;
-    },
-
-    /**
-     * Generates a random value with between a low and high.
-     * @param lo
-     * @param hi
-     * @private
-     */
-    rand: function(lo, hi) {
-        var v = Math.random() * (hi - lo + 1);
-        return Math.floor(v) + lo;
-    },
-
-    /**
-     * Splits a number into a low and high value.
-     * @param bignum
-     * @private
-     */
-    split: function(bignum) {
-        if (typeof(bignum) == 'number') {
-            var hi = Math.floor(bignum / this.twoPow32);
-            return {
-                lo: Math.floor(bignum - hi * this.twoPow32),
-                hi: hi
-            };
-        }
-        return bignum;
-    }
-}, function() {
-    this.Global = new this({
-        id: 'uuid'
-    });
-});
-/**
  * @author Ed Spencer
  * @class Ext.data.Errors
  * @extends Ext.util.Collection
@@ -33185,53 +33552,6 @@ Ext.define('Ext.data.Errors', {
         
         return this.callParent([obj]);
     }
-});
-
-/**
- * @aside guide ajax
- *
- * A singleton instance of an {@link Ext.data.Connection}. This class
- * is used to communicate with your server side code. It can be used as follows:
- *
- *     Ext.Ajax.request({
- *         url: 'page.php',
- *         params: {
- *             id: 1
- *         },
- *         success: function(response){
- *             var text = response.responseText;
- *             // process server response here
- *         }
- *     });
- *
- * Default options for all requests can be set by changing a property on the Ext.Ajax class:
- *
- *     Ext.Ajax.timeout = 60000; // 60 seconds
- *
- * Any options specified in the request method for the Ajax request will override any
- * defaults set on the Ext.Ajax class. In the code sample below, the timeout for the
- * request will be 60 seconds.
- *
- *     Ext.Ajax.timeout = 120000; // 120 seconds
- *     Ext.Ajax.request({
- *         url: 'page.aspx',
- *         timeout: 60000
- *     });
- *
- * In general, this class will be used for all Ajax requests in your application.
- * The main reason for creating a separate {@link Ext.data.Connection} is for a
- * series of requests that share common settings that are different to all other
- * requests in the application.
- */
-Ext.define('Ext.Ajax', {
-    extend: 'Ext.data.Connection',
-    singleton: true,
-
-    /**
-     * @property {Boolean} autoAbort
-     * Whether a new request should abort any pending requests.
-     */
-    autoAbort : false
 });
 
 /**
@@ -33560,610 +33880,6 @@ Ext.define('Ext.data.ModelManager', {
 });
 
 /**
- * @class Ext.data.Types
- * <p>This is s static class containing the system-supplied data types which may be given to a {@link Ext.data.Field Field}.<p/>
- * <p>The properties in this class are used as type indicators in the {@link Ext.data.Field Field} class, so to
- * test whether a Field is of a certain type, compare the {@link Ext.data.Field#type type} property against properties
- * of this class.</p>
- * <p>Developers may add their own application-specific data types to this class. Definition names must be UPPERCASE.
- * each type definition must contain three properties:</p>
- * <div class="mdetail-params"><ul>
- * <li><code>convert</code> : <i>Function</i><div class="sub-desc">A function to convert raw data values from a data block into the data
- * to be stored in the Field. The function is passed the collowing parameters:
- * <div class="mdetail-params"><ul>
- * <li><b>v</b> : Mixed<div class="sub-desc">The data value as read by the Reader, if undefined will use
- * the configured <tt>{@link Ext.data.Field#defaultValue defaultValue}</tt>.</div></li>
- * <li><b>rec</b> : Mixed<div class="sub-desc">The data object containing the row as read by the Reader.
- * Depending on the Reader type, this could be an Array ({@link Ext.data.reader.Array ArrayReader}), an object
- * ({@link Ext.data.reader.Json JsonReader}), or an XML element.</div></li>
- * </ul></div></div></li>
- * <li><code>sortType</code> : <i>Function</i> <div class="sub-desc">A function to convert the stored data into comparable form, as defined by {@link Ext.data.SortTypes}.</div></li>
- * <li><code>type</code> : <i>String</i> <div class="sub-desc">A textual data type name.</div></li>
- * </ul></div>
- * <p>For example, to create a VELatLong field (See the Microsoft Bing Mapping API) containing the latitude/longitude value of a datapoint on a map from a JsonReader data block
- * which contained the properties <code>lat</code> and <code>long</code>, you would define a new data type like this:</p>
- *<pre><code>
-// Add a new Field data type which stores a VELatLong object in the Record.
-Ext.data.Types.VELATLONG = {
-    convert: function(v, data) {
-        return new VELatLong(data.lat, data.long);
-    },
-    sortType: function(v) {
-        return v.Latitude;  // When sorting, order by latitude
-    },
-    type: 'VELatLong'
-};
-</code></pre>
- * <p>Then, when declaring a Model, use <pre><code>
-var types = Ext.data.Types; // allow shorthand type access
-Ext.define('Unit', {
-    extend: 'Ext.data.Model',
-    config: {
-        fields: [
-            { name: 'unitName', mapping: 'UnitName' },
-            { name: 'curSpeed', mapping: 'CurSpeed', type: types.INT },
-            { name: 'latitude', mapping: 'lat', type: types.FLOAT },
-            { name: 'position', type: types.VELATLONG }
-        ]
-    }
-});
-</code></pre>
- * @singleton
- */
-Ext.define('Ext.data.Types', {
-    singleton: true,
-    requires: ['Ext.data.SortTypes'],
-
-    /**
-     * @property {RegExp} stripRe
-     * A regular expression for stripping non-numeric characters from a numeric value. Defaults to <tt>/[\$,%]/g</tt>.
-     * This should be overridden for localization.
-     */
-    stripRe: /[\$,%]/g,
-    dashesRe: /-/g,
-    iso8601TestRe: /\d\dT\d\d/,
-    iso8601SplitRe: /[- :T\.Z\+]/
-
-}, function() {
-    var Types = this,
-        sortTypes = Ext.data.SortTypes;
-
-    Ext.apply(Types, {
-        /**
-         * @property {Object} AUTO
-         * This data type means that no conversion is applied to the raw data before it is placed into a Record.
-         */
-        AUTO: {
-            convert: function(value) {
-                return value;
-            },
-            sortType: sortTypes.none,
-            type: 'auto'
-        },
-
-        /**
-         * @property {Object} STRING
-         * This data type means that the raw data is converted into a String before it is placed into a Record.
-         */
-        STRING: {
-            convert: function(value) {
-                // 'this' is the actual field that calls this convert method
-                return (value === undefined || value === null)
-                    ? (this.getAllowNull() ? null : '')
-                    : String(value);
-            },
-            sortType: sortTypes.asUCString,
-            type: 'string'
-        },
-
-        /**
-         * @property {Object} INT
-         * This data type means that the raw data is converted into an integer before it is placed into a Record.
-         * <p>The synonym <code>INTEGER</code> is equivalent.</p>
-         */
-        INT: {
-            convert: function(value) {
-                return (value !== undefined && value !== null && value !== '')
-                    ? ((typeof value === 'number')
-                        ? parseInt(value, 10)
-                        : parseInt(String(value).replace(Types.stripRe, ''), 10)
-                    )
-                    : (this.getAllowNull() ? null : 0);
-            },
-            sortType: sortTypes.none,
-            type: 'int'
-        },
-
-        /**
-         * @property {Object} FLOAT
-         * This data type means that the raw data is converted into a number before it is placed into a Record.
-         * <p>The synonym <code>NUMBER</code> is equivalent.</p>
-         */
-        FLOAT: {
-            convert: function(value) {
-                return (value !== undefined && value !== null && value !== '')
-                    ? ((typeof value === 'number')
-                        ? value
-                        : parseFloat(String(value).replace(Types.stripRe, ''), 10)
-                    )
-                    : (this.getAllowNull() ? null : 0);
-            },
-            sortType: sortTypes.none,
-            type: 'float'
-        },
-
-        /**
-         * @property {Object} BOOL
-         * <p>This data type means that the raw data is converted into a boolean before it is placed into
-         * a Record. The string "true" and the number 1 are converted to boolean <code>true</code>.</p>
-         * <p>The synonym <code>BOOLEAN</code> is equivalent.</p>
-         */
-        BOOL: {
-            convert: function(value) {
-                if ((value === undefined || value === null || value === '') && this.getAllowNull()) {
-                    return null;
-                }
-                return value !== 'false' && !!value;
-            },
-            sortType: sortTypes.none,
-            type: 'bool'
-        },
-
-        /**
-         * @property {Object} DATE
-         * This data type means that the raw data is converted into a Date before it is placed into a Record.
-         * The date format is specified in the constructor of the {@link Ext.data.Field} to which this type is
-         * being applied.
-         */
-        DATE: {
-            convert: function(value) {
-                var dateFormat = this.getDateFormat(),
-                    parsed;
-
-                if (!value) {
-                    return null;
-                }
-                if (Ext.isDate(value)) {
-                    return value;
-                }
-                if (dateFormat) {
-                    if (dateFormat == 'timestamp') {
-                        return new Date(value*1000);
-                    }
-                    if (dateFormat == 'time') {
-                        return new Date(parseInt(value, 10));
-                    }
-                    return Ext.Date.parse(value, dateFormat);
-                }
-
-                parsed = new Date(Date.parse(value));
-                if (isNaN(parsed)) {
-                    // Dates with ISO 8601 format are not well supported by mobile devices, this can work around the issue.
-                    if (Types.iso8601TestRe.test(value)) {
-                        parsed = value.split(Types.iso8601SplitRe);
-                        parsed = new Date(parsed[0], parsed[1]-1, parsed[2], parsed[3], parsed[4], parsed[5]);
-                    }
-                    if (isNaN(parsed)) {
-                        // Dates with the format "2012-01-20" fail, but "2012/01/20" work in some browsers. We'll try and
-                        // get around that.
-                        parsed = new Date(Date.parse(value.replace(this.dashesRe, "/")));
-                    }
-                }
-
-                return isNaN(parsed) ? null : parsed;
-            },
-            sortType: sortTypes.asDate,
-            type: 'date'
-        }
-    });
-
-    Ext.apply(Types, {
-        /**
-         * @property {Object} BOOLEAN
-         * <p>This data type means that the raw data is converted into a boolean before it is placed into
-         * a Record. The string "true" and the number 1 are converted to boolean <code>true</code>.</p>
-         * <p>The synonym <code>BOOL</code> is equivalent.</p>
-         */
-        BOOLEAN: this.BOOL,
-
-        /**
-         * @property {Object} INTEGER
-         * This data type means that the raw data is converted into an integer before it is placed into a Record.
-         * <p>The synonym <code>INT</code> is equivalent.</p>
-         */
-        INTEGER: this.INT,
-
-        /**
-         * @property {Object} NUMBER
-         * This data type means that the raw data is converted into a number before it is placed into a Record.
-         * <p>The synonym <code>FLOAT</code> is equivalent.</p>
-         */
-        NUMBER: this.FLOAT
-    });
-});
-
-/**
- * @author Ed Spencer
- * @aside guide models
- *
- * Fields are used to define what a Model is. They aren't instantiated directly - instead, when we create a class that
- * extends {@link Ext.data.Model}, it will automatically create a Field instance for each field configured in a {@link
- * Ext.data.Model Model}. For example, we might set up a model like this:
- *
- *     Ext.define('User', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             fields: [
- *                 'name', 'email',
- *                 {name: 'age', type: 'int'},
- *                 {name: 'gender', type: 'string', defaultValue: 'Unknown'}
- *             ]
- *         }
- *     });
- *
- * Four fields will have been created for the User Model - name, email, age and gender. Note that we specified a couple
- * of different formats here; if we only pass in the string name of the field (as with name and email), the field is set
- * up with the 'auto' type. It's as if we'd done this instead:
- *
- *     Ext.define('User', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             fields: [
- *                 {name: 'name', type: 'auto'},
- *                 {name: 'email', type: 'auto'},
- *                 {name: 'age', type: 'int'},
- *                 {name: 'gender', type: 'string', defaultValue: 'Unknown'}
- *             ]
- *         }
- *     });
- *
- * # Types and conversion
- *
- * The {@link #type} is important - it's used to automatically convert data passed to the field into the correct format.
- * In our example above, the name and email fields used the 'auto' type and will just accept anything that is passed
- * into them. The 'age' field had an 'int' type however, so if we passed 25.4 this would be rounded to 25.
- *
- * Sometimes a simple type isn't enough, or we want to perform some processing when we load a Field's data. We can do
- * this using a {@link #convert} function. Here, we're going to create a new field based on another:
- *
- *     Ext.define('User', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             fields: [
- *                 'name', 'email',
- *                 {name: 'age', type: 'int'},
- *                 {name: 'gender', type: 'string', defaultValue: 'Unknown'},
- *
- *                 {
- *                     name: 'firstName',
- *                     convert: function(value, record) {
- *                         var fullName  = record.get('name'),
- *                             splits    = fullName.split(" "),
- *                             firstName = splits[0];
- *
- *                         return firstName;
- *                     }
- *                 }
- *             ]
- *         }
- *     });
- *
- * Now when we create a new User, the firstName is populated automatically based on the name:
- *
- *     var ed = Ext.create('User', {name: 'Ed Spencer'});
- *
- *     console.log(ed.get('firstName')); //logs 'Ed', based on our convert function
- *
- * In fact, if we log out all of the data inside ed, we'll see this:
- *
- *     console.log(ed.data);
- *
- *     //outputs this:
- *     {
- *         age: 0,
- *         email: "",
- *         firstName: "Ed",
- *         gender: "Unknown",
- *         name: "Ed Spencer"
- *     }
- *
- * The age field has been given a default of zero because we made it an int type. As an auto field, email has defaulted
- * to an empty string. When we registered the User model we set gender's {@link #defaultValue} to 'Unknown' so we see
- * that now. Let's correct that and satisfy ourselves that the types work as we expect:
- *
- *     ed.set('gender', 'Male');
- *     ed.get('gender'); //returns 'Male'
- *
- *     ed.set('age', 25.4);
- *     ed.get('age'); //returns 25 - we wanted an int, not a float, so no decimal places allowed
- */
-Ext.define('Ext.data.Field', {
-    requires: ['Ext.data.Types', 'Ext.data.SortTypes'],
-    alias: 'data.field',
-
-    isField: true,
-
-    config: {
-        /**
-         * @cfg {String} name
-         *
-         * The name by which the field is referenced within the Model. This is referenced by, for example, the `dataIndex`
-         * property in column definition objects passed to Ext.grid.property.HeaderContainer.
-         *
-         * Note: In the simplest case, if no properties other than `name` are required, a field definition may consist of
-         * just a String for the field name.
-         */
-        name: null,
-
-        /**
-         * @cfg {String/Object} type
-         *
-         * The data type for automatic conversion from received data to the *stored* value if
-         * `{@link Ext.data.Field#convert convert}` has not been specified. This may be specified as a string value.
-         * Possible values are
-         *
-         * - auto (Default, implies no conversion)
-         * - string
-         * - int
-         * - float
-         * - boolean
-         * - date
-         *
-         * This may also be specified by referencing a member of the {@link Ext.data.Types} class.
-         *
-         * Developers may create their own application-specific data types by defining new members of the {@link
-         * Ext.data.Types} class.
-         */
-        type: 'auto',
-
-        /**
-         * @cfg {Function} convert
-         *
-         * A function which converts the value provided by the Reader into an object that will be stored in the Model.
-         * It is passed the following parameters:
-         *
-         * - **v** : Mixed
-         *
-         *   The data value as read by the Reader, if undefined will use the configured `{@link Ext.data.Field#defaultValue
-         *   defaultValue}`.
-         *
-         * - **rec** : Ext.data.Model
-         *
-         *   The data object containing the Model as read so far by the Reader. Note that the Model may not be fully populated
-         *   at this point as the fields are read in the order that they are defined in your
-         *   {@link Ext.data.Model#cfg-fields fields} array.
-         *
-         * Example of convert functions:
-         *
-         *     function fullName(v, record) {
-         *         return record.name.last + ', ' + record.name.first;
-         *     }
-         *
-         *     function location(v, record) {
-         *         return !record.city ? '' : (record.city + ', ' + record.state);
-         *     }
-         *
-         *     Ext.define('Dude', {
-         *         extend: 'Ext.data.Model',
-         *         fields: [
-         *             {name: 'fullname',  convert: fullName},
-         *             {name: 'firstname', mapping: 'name.first'},
-         *             {name: 'lastname',  mapping: 'name.last'},
-         *             {name: 'city', defaultValue: 'homeless'},
-         *             'state',
-         *             {name: 'location',  convert: location}
-         *         ]
-         *     });
-         *
-         *     // create the data store
-         *     var store = Ext.create('Ext.data.Store', {
-         *         reader: {
-         *             type: 'json',
-         *             model: 'Dude',
-         *             idProperty: 'key',
-         *             rootProperty: 'daRoot',
-         *             totalProperty: 'total'
-         *         }
-         *     });
-         *
-         *     var myData = [
-         *         { key: 1,
-         *           name: { first: 'Fat',    last:  'Albert' }
-         *           // notice no city, state provided in data2 object
-         *         },
-         *         { key: 2,
-         *           name: { first: 'Barney', last:  'Rubble' },
-         *           city: 'Bedrock', state: 'Stoneridge'
-         *         },
-         *         { key: 3,
-         *           name: { first: 'Cliff',  last:  'Claven' },
-         *           city: 'Boston',  state: 'MA'
-         *         }
-         *     ];
-         */
-        convert: undefined,
-
-        /**
-         * @cfg {String} dateFormat
-         *
-         * Used when converting received data into a Date when the {@link #type} is specified as `"date"`.
-         *
-         * A format string for the {@link Ext.Date#parse Ext.Date.parse} function, or "timestamp" if the value provided by
-         * the Reader is a UNIX timestamp, or "time" if the value provided by the Reader is a javascript millisecond
-         * timestamp. See {@link Ext.Date}.
-         */
-        dateFormat: null,
-
-        /**
-         * @cfg {Boolean} allowNull
-         *
-         * Use when converting received data into a boolean, string or number type (either int or float). If the value cannot be
-         * parsed, null will be used if allowNull is true, otherwise the value will be 0. Defaults to true.
-         */
-        allowNull: true,
-
-        /**
-         * @cfg {Object} defaultValue
-         *
-         * The default value used **when a Model is being created by a {@link Ext.data.reader.Reader Reader}**
-         * when the item referenced by the `{@link Ext.data.Field#mapping mapping}` does not exist in the data object
-         * (i.e. undefined). Defaults to "".
-         */
-        defaultValue: undefined,
-
-        /**
-         * @cfg {String/Number} mapping
-         *
-         * (Optional) A path expression for use by the {@link Ext.data.reader.Reader} implementation that is creating the
-         * {@link Ext.data.Model Model} to extract the Field value from the data object. If the path expression is the same
-         * as the field name, the mapping may be omitted.
-         *
-         * The form of the mapping expression depends on the Reader being used.
-         *
-         * - {@link Ext.data.reader.Json}
-         *
-         *   The mapping is a string containing the javascript expression to reference the data from an element of the data2
-         *   item's {@link Ext.data.reader.Json#rootProperty rootProperty} Array. Defaults to the field name.
-         *
-         * - {@link Ext.data.reader.Xml}
-         *
-         *   The mapping is an {@link Ext.DomQuery} path to the data item relative to the DOM element that represents the
-         *   {@link Ext.data.reader.Xml#record record}. Defaults to the field name.
-         *
-         * - {@link Ext.data.reader.Array}
-         *
-         *   The mapping is a number indicating the Array index of the field's value. Defaults to the field specification's
-         *   Array position.
-         *
-         * If a more complex value extraction strategy is required, then configure the Field with a {@link #convert}
-         * function. This is passed the whole row object, and may interrogate it in whatever way is necessary in order to
-         * return the desired data.
-         */
-        mapping: null,
-
-        /**
-         * @cfg {Function} sortType
-         *
-         * A function which converts a Field's value to a comparable value in order to ensure correct sort ordering.
-         * Predefined functions are provided in {@link Ext.data.SortTypes}. A custom sort example:
-         *
-         *     // current sort     after sort we want
-         *     // +-+------+          +-+------+
-         *     // |1|First |          |1|First |
-         *     // |2|Last  |          |3|Second|
-         *     // |3|Second|          |2|Last  |
-         *     // +-+------+          +-+------+
-         *
-         *     sortType: function(value) {
-         *        switch (value.toLowerCase()) // native toLowerCase():
-         *        {
-         *           case 'first': return 1;
-         *           case 'second': return 2;
-         *           default: return 3;
-         *        }
-         *     }
-         */
-        sortType : undefined,
-
-        /**
-         * @cfg {String} sortDir
-         *
-         * Initial direction to sort (`"ASC"` or `"DESC"`). Defaults to `"ASC"`.
-         */
-        sortDir : "ASC",
-
-        /**
-         * @cfg {Boolean} allowBlank
-         * @private
-         *
-         * Used for validating a {@link Ext.data.Model model}. Defaults to true. An empty value here will cause
-         * {@link Ext.data.Model}.{@link Ext.data.Model#isValid isValid} to evaluate to false.
-         */
-        allowBlank : true,
-
-        /**
-         * @cfg {Boolean} persist
-         *
-         * False to exclude this field from being synchronized with the server or localstorage.
-         * This option is useful when model fields are used to keep state on the client but do
-         * not need to be persisted to the server. Defaults to true.
-         */
-        persist: true,
-
-        // Used in LocalStorage stuff
-        encode: null,
-        decode: null,
-
-        bubbleEvents: 'action'
-    },
-
-    constructor : function(config) {
-        // This adds support for just passing a string used as the field name
-        if (Ext.isString(config)) {
-            config = {name: config};
-        }
-
-        this.initConfig(config);
-    },
-
-    applyType: function(type) {
-        var types = Ext.data.Types,
-            autoType = types.AUTO;
-
-        if (type) {
-            if (Ext.isString(type)) {
-                return types[type.toUpperCase()] || autoType;
-            } else {
-                // At this point we expect an actual type
-                return type;
-            }
-        }
-
-        return autoType;
-    },
-
-    updateType: function(newType, oldType) {
-        var convert = this.getConvert();
-        if (oldType && convert === oldType.convert) {
-            this.setConvert(newType.convert);
-        }
-    },
-
-    applySortType: function(sortType) {
-        var sortTypes = Ext.data.SortTypes,
-            type = this.getType(),
-            defaultSortType = type.sortType;
-
-        if (sortType) {
-            if (Ext.isString(sortType)) {
-                return sortTypes[sortType] || defaultSortType;
-            } else {
-                // At this point we expect a function
-                return sortType;
-            }
-        }
-
-        return defaultSortType;
-    },
-
-    applyConvert: function(convert) {
-        var defaultConvert = this.getType().convert;
-        if (convert && convert !== defaultConvert) {
-            this._hasCustomConvert = true;
-            return convert;
-        } else {
-            this._hasCustomConvert = false;
-            return defaultConvert;
-        }
-    },
-
-    hasCustomConvert: function() {
-        return this._hasCustomConvert;
-    }
-
-});
-
-/**
  * @author Ed Spencer
  * @aside guide models
  *
@@ -34446,381 +34162,6 @@ Ext.define('Ext.data.association.Association', {
     }
 
     // Convert old properties in data into a config object
-});
-
-/**
- * @author Ed Spencer
- * @aside guide models
- *
- * Represents a many to one association with another model. The owner model is expected to have
- * a foreign key which references the primary key of the associated model:
- *
- *     Ext.define('Category', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             fields: [
- *                 { name: 'id',   type: 'int' },
- *                 { name: 'name', type: 'string' }
- *             ]
- *         }
- *     });
- *
- *     Ext.define('Product', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             fields: [
- *                 { name: 'id',          type: 'int' },
- *                 { name: 'category_id', type: 'int' },
- *                 { name: 'name',        type: 'string' }
- *             ],
- *             // we can use the belongsTo shortcut on the model to create a belongsTo association
- *             associations: { type: 'belongsTo', model: 'Category' }
- *         }
- *     });
- *
- * In the example above we have created models for Products and Categories, and linked them together
- * by saying that each Product belongs to a Category. This automatically links each Product to a Category
- * based on the Product's category_id, and provides new functions on the Product model:
- *
- * ## Generated getter function
- *
- * The first function that is added to the owner model is a getter function:
- *
- *     var product = new Product({
- *         id: 100,
- *         category_id: 20,
- *         name: 'Sneakers'
- *     });
- *
- *     product.getCategory(function(category, operation) {
- *         // do something with the category object
- *         alert(category.get('id')); // alerts 20
- *     }, this);
- *
- * The getCategory function was created on the Product model when we defined the association. This uses the
- * Category's configured {@link Ext.data.proxy.Proxy proxy} to load the Category asynchronously, calling the provided
- * callback when it has loaded.
- *
- * The new getCategory function will also accept an object containing success, failure and callback properties
- * - callback will always be called, success will only be called if the associated model was loaded successfully
- * and failure will only be called if the associatied model could not be loaded:
- *
- *     product.getCategory({
- *         reload: true, // force a reload if the owner model is already cached
- *         callback: function(category, operation) {}, // a function that will always be called
- *         success : function(category, operation) {}, // a function that will only be called if the load succeeded
- *         failure : function(category, operation) {}, // a function that will only be called if the load did not succeed
- *         scope   : this // optionally pass in a scope object to execute the callbacks in
- *     });
- *
- * In each case above the callbacks are called with two arguments - the associated model instance and the
- * {@link Ext.data.Operation operation} object that was executed to load that instance. The Operation object is
- * useful when the instance could not be loaded.
- *
- * Once the getter has been called on the model, it will be cached if the getter is called a second time. To
- * force the model to reload, specify reload: true in the options object.
- *
- * ## Generated setter function
- *
- * The second generated function sets the associated model instance - if only a single argument is passed to
- * the setter then the following two calls are identical:
- *
- *     // this call...
- *     product.setCategory(10);
- *
- *     // is equivalent to this call:
- *     product.set('category_id', 10);
- *
- * An instance of the owner model can also be passed as a parameter.
- *
- * If we pass in a second argument, the model will be automatically saved and the second argument passed to
- * the owner model's {@link Ext.data.Model#save save} method:
- *
- *     product.setCategory(10, function(product, operation) {
- *         // the product has been saved
- *         alert(product.get('category_id')); //now alerts 10
- *     });
- *
- *     //alternative syntax:
- *     product.setCategory(10, {
- *         callback: function(product, operation), // a function that will always be called
- *         success : function(product, operation), // a function that will only be called if the load succeeded
- *         failure : function(product, operation), // a function that will only be called if the load did not succeed
- *         scope   : this //optionally pass in a scope object to execute the callbacks in
- *     })
- *
- * ## Customisation
- *
- * Associations reflect on the models they are linking to automatically set up properties such as the
- * {@link #primaryKey} and {@link #foreignKey}. These can alternatively be specified:
- *
- *     Ext.define('Product', {
- *         extend: 'Ext.data.Model',
- *         config: {
- *             fields: [ // ...
- *             ],
- *
- *             associations: [
- *                 { type: 'belongsTo', model: 'Category', primaryKey: 'unique_id', foreignKey: 'cat_id' }
- *             ]
- *         }
- *     });
- *
- * Here we replaced the default primary key (defaults to 'id') and foreign key (calculated as 'category_id')
- * with our own settings. Usually this will not be needed.
- */
-Ext.define('Ext.data.association.BelongsTo', {
-    extend: 'Ext.data.association.Association',
-    alternateClassName: 'Ext.data.BelongsToAssociation',
-    alias: 'association.belongsto',
-
-    config: {
-        /**
-         * @cfg {String} foreignKey The name of the foreign key on the owner model that links it to the associated
-         * model. Defaults to the lowercased name of the associated model plus "_id", e.g. an association with a
-         * model called Product would set up a product_id foreign key.
-         *
-         *     Ext.define('Order', {
-         *         extend: 'Ext.data.Model',
-         *         fields: ['id', 'date'],
-         *         hasMany: 'Product'
-         *     });
-         *
-         *     Ext.define('Product', {
-         *         extend: 'Ext.data.Model',
-         *         fields: ['id', 'name', 'order_id'], // refers to the id of the order that this product belongs to
-         *         belongsTo: 'Group'
-         *     });
-         *     var product = new Product({
-         *         id: 1,
-         *         name: 'Product 1',
-         *         order_id: 22
-         *     }, 1);
-         *     product.getOrder(); // Will make a call to the server asking for order_id 22
-         *
-         */
-        foreignKey: undefined,
-
-        /**
-         * @cfg {String} getterName The name of the getter function that will be added to the local model's prototype.
-         * Defaults to 'get' + the name of the foreign model, e.g. getCategory
-         */
-        getterName: undefined,
-
-        /**
-         * @cfg {String} setterName The name of the setter function that will be added to the local model's prototype.
-         * Defaults to 'set' + the name of the foreign model, e.g. setCategory
-         */
-        setterName: undefined,
-
-        instanceName: undefined
-    },
-
-    applyForeignKey: function(foreignKey) {
-        if (!foreignKey) {
-            foreignKey = this.getAssociatedName().toLowerCase() + '_id';
-        }
-        return foreignKey;
-    },
-
-    updateForeignKey: function(foreignKey, oldForeignKey) {
-        var fields = this.getOwnerModel().getFields(),
-            field = fields.get(foreignKey);
-
-        if (!field) {
-            field = new Ext.data.Field({
-                name: foreignKey
-            });
-            fields.add(field);
-            fields.isDirty = true;
-        }
-
-        if (oldForeignKey) {
-            field = fields.get(oldForeignKey);
-            if (field) {
-                fields.isDirty = true;
-                fields.remove(field);
-            }
-        }
-    },
-
-    applyInstanceName: function(instanceName) {
-        if (!instanceName) {
-            instanceName = this.getAssociatedName() + 'BelongsToInstance';
-        }
-        return instanceName;
-    },
-
-    applyAssociationKey: function(associationKey) {
-        if (!associationKey) {
-            var associatedName = this.getAssociatedName();
-            associationKey = associatedName[0].toLowerCase() + associatedName.slice(1);
-        }
-        return associationKey;
-    },
-
-    applyGetterName: function(getterName) {
-        if (!getterName) {
-            var associatedName = this.getAssociatedName();
-            getterName = 'get' + associatedName[0].toUpperCase() + associatedName.slice(1);
-        }
-        return getterName;
-    },
-
-    applySetterName: function(setterName) {
-        if (!setterName) {
-            var associatedName = this.getAssociatedName();
-            setterName = 'set' + associatedName[0].toUpperCase() + associatedName.slice(1);
-        }
-        return setterName;
-    },
-
-    updateGetterName: function(getterName, oldGetterName) {
-        var ownerProto = this.getOwnerModel().prototype;
-        if (oldGetterName) {
-            delete ownerProto[oldGetterName];
-        }
-        if (getterName) {
-            ownerProto[getterName] = this.createGetter();
-        }
-    },
-
-    updateSetterName: function(setterName, oldSetterName) {
-        var ownerProto = this.getOwnerModel().prototype;
-        if (oldSetterName) {
-            delete ownerProto[oldSetterName];
-        }
-        if (setterName) {
-            ownerProto[setterName] = this.createSetter();
-        }
-    },
-
-    /**
-     * @private
-     * Returns a setter function to be placed on the owner model's prototype
-     * @return {Function} The setter function
-     */
-    createSetter: function() {
-        var me = this,
-            foreignKey = me.getForeignKey();
-
-        //'this' refers to the Model instance inside this function
-        return function(value, options, scope) {
-            var inverse = me.getInverseAssociation();
-
-            // If we pass in an instance, pull the id out
-            if (value && value.isModel) {
-                value = value.getId();
-            }
-            this.set(foreignKey, value);
-
-            if (Ext.isFunction(options)) {
-                options = {
-                    callback: options,
-                    scope: scope || this
-                };
-            }
-
-            if (inverse) {
-                value = Ext.data.Model.cache[Ext.data.Model.generateCacheId(inverse.getOwnerModel().modelName, value)];
-                if (value) {
-                    if (inverse.getType().toLowerCase() === 'hasmany') {
-                        var store = value[inverse.getName()]();
-                        store.add(this);
-                    } else {
-                        value[inverse.getInstanceName()] = this;
-                    }
-                }
-            }
-
-            if (Ext.isObject(options)) {
-                return this.save(options);
-            }
-        };
-    },
-
-    /**
-     * @private
-     * Returns a getter function to be placed on the owner model's prototype. We cache the loaded instance
-     * the first time it is loaded so that subsequent calls to the getter always receive the same reference.
-     * @return {Function} The getter function
-     */
-    createGetter: function() {
-        var me              = this,
-            associatedModel = me.getAssociatedModel(),
-            foreignKey      = me.getForeignKey(),
-            instanceName    = me.getInstanceName();
-
-        //'this' refers to the Model instance inside this function
-        return function(options, scope) {
-            options = options || {};
-
-            var model = this,
-                foreignKeyId = model.get(foreignKey),
-                success,
-                instance,
-                args;
-
-            instance = model[instanceName];
-            if (!instance) {
-                instance = Ext.data.Model.cache[Ext.data.Model.generateCacheId(associatedModel.modelName, foreignKeyId)];
-                if (instance) {
-                    model[instanceName] = instance;
-                }
-            }
-
-            if (options.reload === true || instance === undefined) {
-                if (typeof options == 'function') {
-                    options = {
-                        callback: options,
-                        scope: scope || model
-                    };
-                }
-
-                // Overwrite the success handler so we can assign the current instance
-                success = options.success;
-                options.success = function(rec) {
-                    model[instanceName] = rec;
-                    if (success) {
-                        success.call(this, arguments);
-                    }
-                };
-
-                associatedModel.load(foreignKeyId, options);
-            } else {
-                args = [instance];
-                scope = scope || model;
-
-                Ext.callback(options, scope, args);
-                Ext.callback(options.success, scope, args);
-                Ext.callback(options.failure, scope, args);
-                Ext.callback(options.callback, scope, args);
-
-                return instance;
-            }
-        };
-    },
-
-    /**
-     * Read associated data
-     * @private
-     * @param {Ext.data.Model} record The record we're writing to
-     * @param {Ext.data.reader.Reader} reader The reader for the associated model
-     * @param {Object} associationData The raw associated data
-     */
-    read: function(record, reader, associationData){
-        record[this.getInstanceName()] = reader.read([associationData]).getRecords()[0];
-    },
-
-    getInverseAssociation: function() {
-        var ownerName = this.getOwnerModel().modelName,
-            foreignKey = this.getForeignKey();
-
-        return this.getAssociatedModel().associations.findBy(function(assoc) {
-            var type = assoc.getType().toLowerCase();
-            return (type === 'hasmany' || type === 'hasone') && assoc.getAssociatedModel().modelName === ownerName && assoc.getForeignKey() === foreignKey;
-        });
-    }
 });
 
 /**
@@ -35354,14 +34695,14 @@ Ext.define('Ext.data.association.HasOne', {
             if (inverse) {
                 foreignKey = inverse.getForeignKey();
             } else {
-                foreignKey = this.getOwnerName().toLowerCase() + '_id';
+                foreignKey = this.getAssociatedName().toLowerCase() + '_id';
             }
         }
         return foreignKey;
     },
 
     updateForeignKey: function(foreignKey, oldForeignKey) {
-        var fields = this.getAssociatedModel().getFields(),
+        var fields = this.getOwnerModel().getFields(),
             field = fields.get(foreignKey);
 
         if (!field) {
@@ -35383,7 +34724,7 @@ Ext.define('Ext.data.association.HasOne', {
 
     applyInstanceName: function(instanceName) {
         if (!instanceName) {
-            instanceName = this.getAssociatedName() + 'BelongsToInstance';
+            instanceName = this.getAssociatedName() + 'HasOneInstance';
         }
         return instanceName;
     },
@@ -35469,6 +34810,8 @@ Ext.define('Ext.data.association.HasOne', {
             if (Ext.isObject(options)) {
                 return this.save(options);
             }
+
+            return this;
         };
     },
 
@@ -35551,6 +34894,1035 @@ Ext.define('Ext.data.association.HasOne', {
             return assoc.getType().toLowerCase() === 'belongsto' && assoc.getAssociatedModel().modelName === ownerName;
         });
     }
+});
+
+/**
+ * @author Ed Spencer
+ * @aside guide models
+ *
+ * Represents a many to one association with another model. The owner model is expected to have
+ * a foreign key which references the primary key of the associated model:
+ *
+ *     Ext.define('Category', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             fields: [
+ *                 { name: 'id',   type: 'int' },
+ *                 { name: 'name', type: 'string' }
+ *             ]
+ *         }
+ *     });
+ *
+ *     Ext.define('Product', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             fields: [
+ *                 { name: 'id',          type: 'int' },
+ *                 { name: 'category_id', type: 'int' },
+ *                 { name: 'name',        type: 'string' }
+ *             ],
+ *             // we can use the belongsTo shortcut on the model to create a belongsTo association
+ *             associations: { type: 'belongsTo', model: 'Category' }
+ *         }
+ *     });
+ *
+ * In the example above we have created models for Products and Categories, and linked them together
+ * by saying that each Product belongs to a Category. This automatically links each Product to a Category
+ * based on the Product's category_id, and provides new functions on the Product model:
+ *
+ * ## Generated getter function
+ *
+ * The first function that is added to the owner model is a getter function:
+ *
+ *     var product = new Product({
+ *         id: 100,
+ *         category_id: 20,
+ *         name: 'Sneakers'
+ *     });
+ *
+ *     product.getCategory(function(category, operation) {
+ *         // do something with the category object
+ *         alert(category.get('id')); // alerts 20
+ *     }, this);
+ *
+ * The getCategory function was created on the Product model when we defined the association. This uses the
+ * Category's configured {@link Ext.data.proxy.Proxy proxy} to load the Category asynchronously, calling the provided
+ * callback when it has loaded.
+ *
+ * The new getCategory function will also accept an object containing success, failure and callback properties
+ * - callback will always be called, success will only be called if the associated model was loaded successfully
+ * and failure will only be called if the associatied model could not be loaded:
+ *
+ *     product.getCategory({
+ *         reload: true, // force a reload if the owner model is already cached
+ *         callback: function(category, operation) {}, // a function that will always be called
+ *         success : function(category, operation) {}, // a function that will only be called if the load succeeded
+ *         failure : function(category, operation) {}, // a function that will only be called if the load did not succeed
+ *         scope   : this // optionally pass in a scope object to execute the callbacks in
+ *     });
+ *
+ * In each case above the callbacks are called with two arguments - the associated model instance and the
+ * {@link Ext.data.Operation operation} object that was executed to load that instance. The Operation object is
+ * useful when the instance could not be loaded.
+ *
+ * Once the getter has been called on the model, it will be cached if the getter is called a second time. To
+ * force the model to reload, specify reload: true in the options object.
+ *
+ * ## Generated setter function
+ *
+ * The second generated function sets the associated model instance - if only a single argument is passed to
+ * the setter then the following two calls are identical:
+ *
+ *     // this call...
+ *     product.setCategory(10);
+ *
+ *     // is equivalent to this call:
+ *     product.set('category_id', 10);
+ *
+ * An instance of the owner model can also be passed as a parameter.
+ *
+ * If we pass in a second argument, the model will be automatically saved and the second argument passed to
+ * the owner model's {@link Ext.data.Model#save save} method:
+ *
+ *     product.setCategory(10, function(product, operation) {
+ *         // the product has been saved
+ *         alert(product.get('category_id')); //now alerts 10
+ *     });
+ *
+ *     //alternative syntax:
+ *     product.setCategory(10, {
+ *         callback: function(product, operation), // a function that will always be called
+ *         success : function(product, operation), // a function that will only be called if the load succeeded
+ *         failure : function(product, operation), // a function that will only be called if the load did not succeed
+ *         scope   : this //optionally pass in a scope object to execute the callbacks in
+ *     })
+ *
+ * ## Customisation
+ *
+ * Associations reflect on the models they are linking to automatically set up properties such as the
+ * {@link #primaryKey} and {@link #foreignKey}. These can alternatively be specified:
+ *
+ *     Ext.define('Product', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             fields: [ // ...
+ *             ],
+ *
+ *             associations: [
+ *                 { type: 'belongsTo', model: 'Category', primaryKey: 'unique_id', foreignKey: 'cat_id' }
+ *             ]
+ *         }
+ *     });
+ *
+ * Here we replaced the default primary key (defaults to 'id') and foreign key (calculated as 'category_id')
+ * with our own settings. Usually this will not be needed.
+ */
+Ext.define('Ext.data.association.BelongsTo', {
+    extend: 'Ext.data.association.Association',
+    alternateClassName: 'Ext.data.BelongsToAssociation',
+    alias: 'association.belongsto',
+
+    config: {
+        /**
+         * @cfg {String} foreignKey The name of the foreign key on the owner model that links it to the associated
+         * model. Defaults to the lowercased name of the associated model plus "_id", e.g. an association with a
+         * model called Product would set up a product_id foreign key.
+         *
+         *     Ext.define('Order', {
+         *         extend: 'Ext.data.Model',
+         *         fields: ['id', 'date'],
+         *         hasMany: 'Product'
+         *     });
+         *
+         *     Ext.define('Product', {
+         *         extend: 'Ext.data.Model',
+         *         fields: ['id', 'name', 'order_id'], // refers to the id of the order that this product belongs to
+         *         belongsTo: 'Group'
+         *     });
+         *     var product = new Product({
+         *         id: 1,
+         *         name: 'Product 1',
+         *         order_id: 22
+         *     }, 1);
+         *     product.getOrder(); // Will make a call to the server asking for order_id 22
+         *
+         */
+        foreignKey: undefined,
+
+        /**
+         * @cfg {String} getterName The name of the getter function that will be added to the local model's prototype.
+         * Defaults to 'get' + the name of the foreign model, e.g. getCategory
+         */
+        getterName: undefined,
+
+        /**
+         * @cfg {String} setterName The name of the setter function that will be added to the local model's prototype.
+         * Defaults to 'set' + the name of the foreign model, e.g. setCategory
+         */
+        setterName: undefined,
+
+        instanceName: undefined
+    },
+
+    applyForeignKey: function(foreignKey) {
+        if (!foreignKey) {
+            foreignKey = this.getAssociatedName().toLowerCase() + '_id';
+        }
+        return foreignKey;
+    },
+
+    updateForeignKey: function(foreignKey, oldForeignKey) {
+        var fields = this.getOwnerModel().getFields(),
+            field = fields.get(foreignKey);
+
+        if (!field) {
+            field = new Ext.data.Field({
+                name: foreignKey
+            });
+            fields.add(field);
+            fields.isDirty = true;
+        }
+
+        if (oldForeignKey) {
+            field = fields.get(oldForeignKey);
+            if (field) {
+                fields.isDirty = true;
+                fields.remove(field);
+            }
+        }
+    },
+
+    applyInstanceName: function(instanceName) {
+        if (!instanceName) {
+            instanceName = this.getAssociatedName() + 'BelongsToInstance';
+        }
+        return instanceName;
+    },
+
+    applyAssociationKey: function(associationKey) {
+        if (!associationKey) {
+            var associatedName = this.getAssociatedName();
+            associationKey = associatedName[0].toLowerCase() + associatedName.slice(1);
+        }
+        return associationKey;
+    },
+
+    applyGetterName: function(getterName) {
+        if (!getterName) {
+            var associatedName = this.getAssociatedName();
+            getterName = 'get' + associatedName[0].toUpperCase() + associatedName.slice(1);
+        }
+        return getterName;
+    },
+
+    applySetterName: function(setterName) {
+        if (!setterName) {
+            var associatedName = this.getAssociatedName();
+            setterName = 'set' + associatedName[0].toUpperCase() + associatedName.slice(1);
+        }
+        return setterName;
+    },
+
+    updateGetterName: function(getterName, oldGetterName) {
+        var ownerProto = this.getOwnerModel().prototype;
+        if (oldGetterName) {
+            delete ownerProto[oldGetterName];
+        }
+        if (getterName) {
+            ownerProto[getterName] = this.createGetter();
+        }
+    },
+
+    updateSetterName: function(setterName, oldSetterName) {
+        var ownerProto = this.getOwnerModel().prototype;
+        if (oldSetterName) {
+            delete ownerProto[oldSetterName];
+        }
+        if (setterName) {
+            ownerProto[setterName] = this.createSetter();
+        }
+    },
+
+    /**
+     * @private
+     * Returns a setter function to be placed on the owner model's prototype
+     * @return {Function} The setter function
+     */
+    createSetter: function() {
+        var me = this,
+            foreignKey = me.getForeignKey();
+
+        //'this' refers to the Model instance inside this function
+        return function(value, options, scope) {
+            var inverse = me.getInverseAssociation();
+
+            // If we pass in an instance, pull the id out
+            if (value && value.isModel) {
+                value = value.getId();
+            }
+            this.set(foreignKey, value);
+
+            if (Ext.isFunction(options)) {
+                options = {
+                    callback: options,
+                    scope: scope || this
+                };
+            }
+
+            if (inverse) {
+                value = Ext.data.Model.cache[Ext.data.Model.generateCacheId(inverse.getOwnerModel().modelName, value)];
+                if (value) {
+                    if (inverse.getType().toLowerCase() === 'hasmany') {
+                        var store = value[inverse.getName()]();
+                        store.add(this);
+                    } else {
+                        value[inverse.getInstanceName()] = this;
+                    }
+                }
+            }
+
+            if (Ext.isObject(options)) {
+                return this.save(options);
+            }
+
+            return this;
+        };
+    },
+
+    /**
+     * @private
+     * Returns a getter function to be placed on the owner model's prototype. We cache the loaded instance
+     * the first time it is loaded so that subsequent calls to the getter always receive the same reference.
+     * @return {Function} The getter function
+     */
+    createGetter: function() {
+        var me              = this,
+            associatedModel = me.getAssociatedModel(),
+            foreignKey      = me.getForeignKey(),
+            instanceName    = me.getInstanceName();
+
+        //'this' refers to the Model instance inside this function
+        return function(options, scope) {
+            options = options || {};
+
+            var model = this,
+                foreignKeyId = model.get(foreignKey),
+                success,
+                instance,
+                args;
+
+            instance = model[instanceName];
+
+            if (!instance) {
+                instance = Ext.data.Model.cache[Ext.data.Model.generateCacheId(associatedModel.modelName, foreignKeyId)];
+                if (instance) {
+                    model[instanceName] = instance;
+                }
+            }
+
+            if (options.reload === true || instance === undefined) {
+                if (typeof options == 'function') {
+                    options = {
+                        callback: options,
+                        scope: scope || model
+                    };
+                }
+
+                // Overwrite the success handler so we can assign the current instance
+                success = options.success;
+                options.success = function(rec) {
+                    model[instanceName] = rec;
+                    if (success) {
+                        success.apply(this, arguments);
+                    }
+                };
+
+                associatedModel.load(foreignKeyId, options);
+            } else {
+                args = [instance];
+                scope = scope || model;
+
+                Ext.callback(options, scope, args);
+                Ext.callback(options.success, scope, args);
+                Ext.callback(options.failure, scope, args);
+                Ext.callback(options.callback, scope, args);
+
+                return instance;
+            }
+        };
+    },
+
+    /**
+     * Read associated data
+     * @private
+     * @param {Ext.data.Model} record The record we're writing to
+     * @param {Ext.data.reader.Reader} reader The reader for the associated model
+     * @param {Object} associationData The raw associated data
+     */
+    read: function(record, reader, associationData){
+        record[this.getInstanceName()] = reader.read([associationData]).getRecords()[0];
+    },
+
+    getInverseAssociation: function() {
+        var ownerName = this.getOwnerModel().modelName,
+            foreignKey = this.getForeignKey();
+
+        return this.getAssociatedModel().associations.findBy(function(assoc) {
+            var type = assoc.getType().toLowerCase();
+            return (type === 'hasmany' || type === 'hasone') && assoc.getAssociatedModel().modelName === ownerName && assoc.getForeignKey() === foreignKey;
+        });
+    }
+});
+
+/**
+ * @aside guide ajax
+ *
+ * A singleton instance of an {@link Ext.data.Connection}. This class
+ * is used to communicate with your server side code. It can be used as follows:
+ *
+ *     Ext.Ajax.request({
+ *         url: 'page.php',
+ *         params: {
+ *             id: 1
+ *         },
+ *         success: function(response){
+ *             var text = response.responseText;
+ *             // process server response here
+ *         }
+ *     });
+ *
+ * Default options for all requests can be set by changing a property on the Ext.Ajax class:
+ *
+ *     Ext.Ajax.setTimeout(60000); // 60 seconds
+ *
+ * Any options specified in the request method for the Ajax request will override any
+ * defaults set on the Ext.Ajax class. In the code sample below, the timeout for the
+ * request will be 60 seconds.
+ *
+ *     Ext.Ajax.setTimeout(120000); // 120 seconds
+ *     Ext.Ajax.request({
+ *         url: 'page.aspx',
+ *         timeout: 60000
+ *     });
+ *
+ * In general, this class will be used for all Ajax requests in your application.
+ * The main reason for creating a separate {@link Ext.data.Connection} is for a
+ * series of requests that share common settings that are different to all other
+ * requests in the application.
+ */
+Ext.define('Ext.Ajax', {
+    extend: 'Ext.data.Connection',
+    singleton: true,
+
+    /**
+     * @property {Boolean} autoAbort
+     * Whether a new request should abort any pending requests.
+     */
+    autoAbort : false
+});
+
+/**
+ * @class Ext.data.Types
+ * <p>This is s static class containing the system-supplied data types which may be given to a {@link Ext.data.Field Field}.<p/>
+ * <p>The properties in this class are used as type indicators in the {@link Ext.data.Field Field} class, so to
+ * test whether a Field is of a certain type, compare the {@link Ext.data.Field#type type} property against properties
+ * of this class.</p>
+ * <p>Developers may add their own application-specific data types to this class. Definition names must be UPPERCASE.
+ * each type definition must contain three properties:</p>
+ * <div class="mdetail-params"><ul>
+ * <li><code>convert</code> : <i>Function</i><div class="sub-desc">A function to convert raw data values from a data block into the data
+ * to be stored in the Field. The function is passed the collowing parameters:
+ * <div class="mdetail-params"><ul>
+ * <li><b>v</b> : Mixed<div class="sub-desc">The data value as read by the Reader, if undefined will use
+ * the configured <tt>{@link Ext.data.Field#defaultValue defaultValue}</tt>.</div></li>
+ * <li><b>rec</b> : Mixed<div class="sub-desc">The data object containing the row as read by the Reader.
+ * Depending on the Reader type, this could be an Array ({@link Ext.data.reader.Array ArrayReader}), an object
+ * ({@link Ext.data.reader.Json JsonReader}), or an XML element.</div></li>
+ * </ul></div></div></li>
+ * <li><code>sortType</code> : <i>Function</i> <div class="sub-desc">A function to convert the stored data into comparable form, as defined by {@link Ext.data.SortTypes}.</div></li>
+ * <li><code>type</code> : <i>String</i> <div class="sub-desc">A textual data type name.</div></li>
+ * </ul></div>
+ * <p>For example, to create a VELatLong field (See the Microsoft Bing Mapping API) containing the latitude/longitude value of a datapoint on a map from a JsonReader data block
+ * which contained the properties <code>lat</code> and <code>long</code>, you would define a new data type like this:</p>
+ *<pre><code>
+// Add a new Field data type which stores a VELatLong object in the Record.
+Ext.data.Types.VELATLONG = {
+    convert: function(v, data) {
+        return new VELatLong(data.lat, data.long);
+    },
+    sortType: function(v) {
+        return v.Latitude;  // When sorting, order by latitude
+    },
+    type: 'VELatLong'
+};
+</code></pre>
+ * <p>Then, when declaring a Model, use <pre><code>
+var types = Ext.data.Types; // allow shorthand type access
+Ext.define('Unit', {
+    extend: 'Ext.data.Model',
+    config: {
+        fields: [
+            { name: 'unitName', mapping: 'UnitName' },
+            { name: 'curSpeed', mapping: 'CurSpeed', type: types.INT },
+            { name: 'latitude', mapping: 'lat', type: types.FLOAT },
+            { name: 'position', type: types.VELATLONG }
+        ]
+    }
+});
+</code></pre>
+ * @singleton
+ */
+Ext.define('Ext.data.Types', {
+    singleton: true,
+    requires: ['Ext.data.SortTypes'],
+
+    /**
+     * @property {RegExp} stripRe
+     * A regular expression for stripping non-numeric characters from a numeric value. Defaults to <tt>/[\$,%]/g</tt>.
+     * This should be overridden for localization.
+     */
+    stripRe: /[\$,%]/g,
+    dashesRe: /-/g,
+    iso8601TestRe: /\d\dT\d\d/,
+    iso8601SplitRe: /[- :T\.Z\+]/
+
+}, function() {
+    var Types = this,
+        sortTypes = Ext.data.SortTypes;
+
+    Ext.apply(Types, {
+        /**
+         * @property {Object} AUTO
+         * This data type means that no conversion is applied to the raw data before it is placed into a Record.
+         */
+        AUTO: {
+            convert: function(value) {
+                return value;
+            },
+            sortType: sortTypes.none,
+            type: 'auto'
+        },
+
+        /**
+         * @property {Object} STRING
+         * This data type means that the raw data is converted into a String before it is placed into a Record.
+         */
+        STRING: {
+            convert: function(value) {
+                // 'this' is the actual field that calls this convert method
+                return (value === undefined || value === null)
+                    ? (this.getAllowNull() ? null : '')
+                    : String(value);
+            },
+            sortType: sortTypes.asUCString,
+            type: 'string'
+        },
+
+        /**
+         * @property {Object} INT
+         * This data type means that the raw data is converted into an integer before it is placed into a Record.
+         * <p>The synonym <code>INTEGER</code> is equivalent.</p>
+         */
+        INT: {
+            convert: function(value) {
+                return (value !== undefined && value !== null && value !== '')
+                    ? ((typeof value === 'number')
+                        ? parseInt(value, 10)
+                        : parseInt(String(value).replace(Types.stripRe, ''), 10)
+                    )
+                    : (this.getAllowNull() ? null : 0);
+            },
+            sortType: sortTypes.none,
+            type: 'int'
+        },
+
+        /**
+         * @property {Object} FLOAT
+         * This data type means that the raw data is converted into a number before it is placed into a Record.
+         * <p>The synonym <code>NUMBER</code> is equivalent.</p>
+         */
+        FLOAT: {
+            convert: function(value) {
+                return (value !== undefined && value !== null && value !== '')
+                    ? ((typeof value === 'number')
+                        ? value
+                        : parseFloat(String(value).replace(Types.stripRe, ''), 10)
+                    )
+                    : (this.getAllowNull() ? null : 0);
+            },
+            sortType: sortTypes.none,
+            type: 'float'
+        },
+
+        /**
+         * @property {Object} BOOL
+         * <p>This data type means that the raw data is converted into a boolean before it is placed into
+         * a Record. The string "true" and the number 1 are converted to boolean <code>true</code>.</p>
+         * <p>The synonym <code>BOOLEAN</code> is equivalent.</p>
+         */
+        BOOL: {
+            convert: function(value) {
+                if ((value === undefined || value === null || value === '') && this.getAllowNull()) {
+                    return null;
+                }
+                return value !== 'false' && !!value;
+            },
+            sortType: sortTypes.none,
+            type: 'bool'
+        },
+
+        /**
+         * @property {Object} DATE
+         * This data type means that the raw data is converted into a Date before it is placed into a Record.
+         * The date format is specified in the constructor of the {@link Ext.data.Field} to which this type is
+         * being applied.
+         */
+        DATE: {
+            convert: function(value) {
+                var dateFormat = this.getDateFormat(),
+                    parsed;
+
+                if (!value) {
+                    return null;
+                }
+                if (Ext.isDate(value)) {
+                    return value;
+                }
+                if (dateFormat) {
+                    if (dateFormat == 'timestamp') {
+                        return new Date(value*1000);
+                    }
+                    if (dateFormat == 'time') {
+                        return new Date(parseInt(value, 10));
+                    }
+                    return Ext.Date.parse(value, dateFormat);
+                }
+
+                parsed = new Date(Date.parse(value));
+                if (isNaN(parsed)) {
+                    // Dates with ISO 8601 format are not well supported by mobile devices, this can work around the issue.
+                    if (Types.iso8601TestRe.test(value)) {
+                        parsed = value.split(Types.iso8601SplitRe);
+                        parsed = new Date(parsed[0], parsed[1]-1, parsed[2], parsed[3], parsed[4], parsed[5]);
+                    }
+                    if (isNaN(parsed)) {
+                        // Dates with the format "2012-01-20" fail, but "2012/01/20" work in some browsers. We'll try and
+                        // get around that.
+                        parsed = new Date(Date.parse(value.replace(Types.dashesRe, "/")));
+                    }
+                }
+
+                return isNaN(parsed) ? null : parsed;
+            },
+            sortType: sortTypes.asDate,
+            type: 'date'
+        }
+    });
+
+    Ext.apply(Types, {
+        /**
+         * @property {Object} BOOLEAN
+         * <p>This data type means that the raw data is converted into a boolean before it is placed into
+         * a Record. The string "true" and the number 1 are converted to boolean <code>true</code>.</p>
+         * <p>The synonym <code>BOOL</code> is equivalent.</p>
+         */
+        BOOLEAN: this.BOOL,
+
+        /**
+         * @property {Object} INTEGER
+         * This data type means that the raw data is converted into an integer before it is placed into a Record.
+         * <p>The synonym <code>INT</code> is equivalent.</p>
+         */
+        INTEGER: this.INT,
+
+        /**
+         * @property {Object} NUMBER
+         * This data type means that the raw data is converted into a number before it is placed into a Record.
+         * <p>The synonym <code>FLOAT</code> is equivalent.</p>
+         */
+        NUMBER: this.FLOAT
+    });
+});
+
+/**
+ * @author Ed Spencer
+ * @aside guide models
+ *
+ * Fields are used to define what a Model is. They aren't instantiated directly - instead, when we create a class that
+ * extends {@link Ext.data.Model}, it will automatically create a Field instance for each field configured in a {@link
+ * Ext.data.Model Model}. For example, we might set up a model like this:
+ *
+ *     Ext.define('User', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             fields: [
+ *                 'name', 'email',
+ *                 {name: 'age', type: 'int'},
+ *                 {name: 'gender', type: 'string', defaultValue: 'Unknown'}
+ *             ]
+ *         }
+ *     });
+ *
+ * Four fields will have been created for the User Model - name, email, age and gender. Note that we specified a couple
+ * of different formats here; if we only pass in the string name of the field (as with name and email), the field is set
+ * up with the 'auto' type. It's as if we'd done this instead:
+ *
+ *     Ext.define('User', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             fields: [
+ *                 {name: 'name', type: 'auto'},
+ *                 {name: 'email', type: 'auto'},
+ *                 {name: 'age', type: 'int'},
+ *                 {name: 'gender', type: 'string', defaultValue: 'Unknown'}
+ *             ]
+ *         }
+ *     });
+ *
+ * # Types and conversion
+ *
+ * The {@link #type} is important - it's used to automatically convert data passed to the field into the correct format.
+ * In our example above, the name and email fields used the 'auto' type and will just accept anything that is passed
+ * into them. The 'age' field had an 'int' type however, so if we passed 25.4 this would be rounded to 25.
+ *
+ * Sometimes a simple type isn't enough, or we want to perform some processing when we load a Field's data. We can do
+ * this using a {@link #convert} function. Here, we're going to create a new field based on another:
+ *
+ *     Ext.define('User', {
+ *         extend: 'Ext.data.Model',
+ *         config: {
+ *             fields: [
+ *                 'name', 'email',
+ *                 {name: 'age', type: 'int'},
+ *                 {name: 'gender', type: 'string', defaultValue: 'Unknown'},
+ *
+ *                 {
+ *                     name: 'firstName',
+ *                     convert: function(value, record) {
+ *                         var fullName  = record.get('name'),
+ *                             splits    = fullName.split(" "),
+ *                             firstName = splits[0];
+ *
+ *                         return firstName;
+ *                     }
+ *                 }
+ *             ]
+ *         }
+ *     });
+ *
+ * Now when we create a new User, the firstName is populated automatically based on the name:
+ *
+ *     var ed = Ext.create('User', {name: 'Ed Spencer'});
+ *
+ *     console.log(ed.get('firstName')); //logs 'Ed', based on our convert function
+ *
+ * In fact, if we log out all of the data inside ed, we'll see this:
+ *
+ *     console.log(ed.data);
+ *
+ *     //outputs this:
+ *     {
+ *         age: 0,
+ *         email: "",
+ *         firstName: "Ed",
+ *         gender: "Unknown",
+ *         name: "Ed Spencer"
+ *     }
+ *
+ * The age field has been given a default of zero because we made it an int type. As an auto field, email has defaulted
+ * to an empty string. When we registered the User model we set gender's {@link #defaultValue} to 'Unknown' so we see
+ * that now. Let's correct that and satisfy ourselves that the types work as we expect:
+ *
+ *     ed.set('gender', 'Male');
+ *     ed.get('gender'); //returns 'Male'
+ *
+ *     ed.set('age', 25.4);
+ *     ed.get('age'); //returns 25 - we wanted an int, not a float, so no decimal places allowed
+ */
+Ext.define('Ext.data.Field', {
+    requires: ['Ext.data.Types', 'Ext.data.SortTypes'],
+    alias: 'data.field',
+
+    isField: true,
+
+    config: {
+        /**
+         * @cfg {String} name
+         *
+         * The name by which the field is referenced within the Model. This is referenced by, for example, the `dataIndex`
+         * property in column definition objects passed to Ext.grid.property.HeaderContainer.
+         *
+         * Note: In the simplest case, if no properties other than `name` are required, a field definition may consist of
+         * just a String for the field name.
+         */
+        name: null,
+
+        /**
+         * @cfg {String/Object} type
+         *
+         * The data type for automatic conversion from received data to the *stored* value if
+         * `{@link Ext.data.Field#convert convert}` has not been specified. This may be specified as a string value.
+         * Possible values are
+         *
+         * - auto (Default, implies no conversion)
+         * - string
+         * - int
+         * - float
+         * - boolean
+         * - date
+         *
+         * This may also be specified by referencing a member of the {@link Ext.data.Types} class.
+         *
+         * Developers may create their own application-specific data types by defining new members of the {@link
+         * Ext.data.Types} class.
+         */
+        type: 'auto',
+
+        /**
+         * @cfg {Function} convert
+         *
+         * A function which converts the value provided by the Reader into an object that will be stored in the Model.
+         * It is passed the following parameters:
+         *
+         * - **v** : Mixed
+         *
+         *   The data value as read by the Reader, if undefined will use the configured `{@link Ext.data.Field#defaultValue
+         *   defaultValue}`.
+         *
+         * - **rec** : Ext.data.Model
+         *
+         *   The data object containing the Model as read so far by the Reader. Note that the Model may not be fully populated
+         *   at this point as the fields are read in the order that they are defined in your
+         *   {@link Ext.data.Model#cfg-fields fields} array.
+         *
+         * Example of convert functions:
+         *
+         *     function fullName(v, record) {
+         *         return record.name.last + ', ' + record.name.first;
+         *     }
+         *
+         *     function location(v, record) {
+         *         return !record.city ? '' : (record.city + ', ' + record.state);
+         *     }
+         *
+         *     Ext.define('Dude', {
+         *         extend: 'Ext.data.Model',
+         *         fields: [
+         *             {name: 'fullname',  convert: fullName},
+         *             {name: 'firstname', mapping: 'name.first'},
+         *             {name: 'lastname',  mapping: 'name.last'},
+         *             {name: 'city', defaultValue: 'homeless'},
+         *             'state',
+         *             {name: 'location',  convert: location}
+         *         ]
+         *     });
+         *
+         *     // create the data store
+         *     var store = Ext.create('Ext.data.Store', {
+         *         reader: {
+         *             type: 'json',
+         *             model: 'Dude',
+         *             idProperty: 'key',
+         *             rootProperty: 'daRoot',
+         *             totalProperty: 'total'
+         *         }
+         *     });
+         *
+         *     var myData = [
+         *         { key: 1,
+         *           name: { first: 'Fat',    last:  'Albert' }
+         *           // notice no city, state provided in data2 object
+         *         },
+         *         { key: 2,
+         *           name: { first: 'Barney', last:  'Rubble' },
+         *           city: 'Bedrock', state: 'Stoneridge'
+         *         },
+         *         { key: 3,
+         *           name: { first: 'Cliff',  last:  'Claven' },
+         *           city: 'Boston',  state: 'MA'
+         *         }
+         *     ];
+         */
+        convert: undefined,
+
+        /**
+         * @cfg {String} dateFormat
+         *
+         * Used when converting received data into a Date when the {@link #type} is specified as `"date"`.
+         *
+         * A format string for the {@link Ext.Date#parse Ext.Date.parse} function, or "timestamp" if the value provided by
+         * the Reader is a UNIX timestamp, or "time" if the value provided by the Reader is a javascript millisecond
+         * timestamp. See {@link Ext.Date}.
+         */
+        dateFormat: null,
+
+        /**
+         * @cfg {Boolean} allowNull
+         *
+         * Use when converting received data into a boolean, string or number type (either int or float). If the value cannot be
+         * parsed, null will be used if allowNull is true, otherwise the value will be 0. Defaults to true.
+         */
+        allowNull: true,
+
+        /**
+         * @cfg {Object} defaultValue
+         *
+         * The default value used **when a Model is being created by a {@link Ext.data.reader.Reader Reader}**
+         * when the item referenced by the `{@link Ext.data.Field#mapping mapping}` does not exist in the data object
+         * (i.e. undefined). Defaults to "".
+         */
+        defaultValue: undefined,
+
+        /**
+         * @cfg {String/Number} mapping
+         *
+         * (Optional) A path expression for use by the {@link Ext.data.reader.Reader} implementation that is creating the
+         * {@link Ext.data.Model Model} to extract the Field value from the data object. If the path expression is the same
+         * as the field name, the mapping may be omitted.
+         *
+         * The form of the mapping expression depends on the Reader being used.
+         *
+         * - {@link Ext.data.reader.Json}
+         *
+         *   The mapping is a string containing the javascript expression to reference the data from an element of the data2
+         *   item's {@link Ext.data.reader.Json#rootProperty rootProperty} Array. Defaults to the field name.
+         *
+         * - {@link Ext.data.reader.Xml}
+         *
+         *   The mapping is an {@link Ext.DomQuery} path to the data item relative to the DOM element that represents the
+         *   {@link Ext.data.reader.Xml#record record}. Defaults to the field name.
+         *
+         * - {@link Ext.data.reader.Array}
+         *
+         *   The mapping is a number indicating the Array index of the field's value. Defaults to the field specification's
+         *   Array position.
+         *
+         * If a more complex value extraction strategy is required, then configure the Field with a {@link #convert}
+         * function. This is passed the whole row object, and may interrogate it in whatever way is necessary in order to
+         * return the desired data.
+         */
+        mapping: null,
+
+        /**
+         * @cfg {Function} sortType
+         *
+         * A function which converts a Field's value to a comparable value in order to ensure correct sort ordering.
+         * Predefined functions are provided in {@link Ext.data.SortTypes}. A custom sort example:
+         *
+         *     // current sort     after sort we want
+         *     // +-+------+          +-+------+
+         *     // |1|First |          |1|First |
+         *     // |2|Last  |          |3|Second|
+         *     // |3|Second|          |2|Last  |
+         *     // +-+------+          +-+------+
+         *
+         *     sortType: function(value) {
+         *        switch (value.toLowerCase()) // native toLowerCase():
+         *        {
+         *           case 'first': return 1;
+         *           case 'second': return 2;
+         *           default: return 3;
+         *        }
+         *     }
+         */
+        sortType : undefined,
+
+        /**
+         * @cfg {String} sortDir
+         *
+         * Initial direction to sort (`"ASC"` or `"DESC"`). Defaults to `"ASC"`.
+         */
+        sortDir : "ASC",
+
+        /**
+         * @cfg {Boolean} allowBlank
+         * @private
+         *
+         * Used for validating a {@link Ext.data.Model model}. Defaults to true. An empty value here will cause
+         * {@link Ext.data.Model}.{@link Ext.data.Model#isValid isValid} to evaluate to false.
+         */
+        allowBlank : true,
+
+        /**
+         * @cfg {Boolean} persist
+         *
+         * False to exclude this field from being synchronized with the server or localstorage.
+         * This option is useful when model fields are used to keep state on the client but do
+         * not need to be persisted to the server. Defaults to true.
+         */
+        persist: true,
+
+        // Used in LocalStorage stuff
+        encode: null,
+        decode: null,
+
+        bubbleEvents: 'action'
+    },
+
+    constructor : function(config) {
+        // This adds support for just passing a string used as the field name
+        if (Ext.isString(config)) {
+            config = {name: config};
+        }
+
+        this.initConfig(config);
+    },
+
+    applyType: function(type) {
+        var types = Ext.data.Types,
+            autoType = types.AUTO;
+
+        if (type) {
+            if (Ext.isString(type)) {
+                return types[type.toUpperCase()] || autoType;
+            } else {
+                // At this point we expect an actual type
+                return type;
+            }
+        }
+
+        return autoType;
+    },
+
+    updateType: function(newType, oldType) {
+        var convert = this.getConvert();
+        if (oldType && convert === oldType.convert) {
+            this.setConvert(newType.convert);
+        }
+    },
+
+    applySortType: function(sortType) {
+        var sortTypes = Ext.data.SortTypes,
+            type = this.getType(),
+            defaultSortType = type.sortType;
+
+        if (sortType) {
+            if (Ext.isString(sortType)) {
+                return sortTypes[sortType] || defaultSortType;
+            } else {
+                // At this point we expect a function
+                return sortType;
+            }
+        }
+
+        return defaultSortType;
+    },
+
+    applyConvert: function(convert) {
+        var defaultConvert = this.getType().convert;
+        if (convert && convert !== defaultConvert) {
+            this._hasCustomConvert = true;
+            return convert;
+        } else {
+            this._hasCustomConvert = false;
+            return defaultConvert;
+        }
+    },
+
+    hasCustomConvert: function() {
+        return this._hasCustomConvert;
+    }
+
 });
 
 /**
@@ -35732,7 +36104,7 @@ Ext.define('Ext.data.writer.Json', {
  *             url : 'users.json',
  *             reader: {
  *                 type: 'json',
- *                 rootPorperty: 'users'
+ *                 rootProperty: 'users'
  *             }
  *         },
  *     });
@@ -35754,7 +36126,7 @@ Ext.define('Ext.data.writer.Json', {
  * associations} configured on each Model. Below is an example demonstrating the flexibility of these associations in a
  * fictional CRM system which manages a User, their Orders, OrderItems and Products. First we'll define the models:
  *
- *     Ext.define("User", {
+ *     Ext.define('User', {
  *         extend: 'Ext.data.Model',
  *         config: {
  *             fields: [
@@ -35768,13 +36140,13 @@ Ext.define('Ext.data.writer.Json', {
  *                 url : 'users.json',
  *                 reader: {
  *                     type: 'json',
- *                     root: 'users'
+ *                     rootProperty: 'users'
  *                 }
  *             }
  *         }
  *     });
  *
- *     Ext.define("Order", {
+ *     Ext.define('Order', {
  *         extend: 'Ext.data.Model',
  *         config: {
  *             fields: [
@@ -35786,7 +36158,7 @@ Ext.define('Ext.data.writer.Json', {
  *         }
  *     });
  *
- *     Ext.define("OrderItem", {
+ *     Ext.define('OrderItem', {
  *         extend: 'Ext.data.Model',
  *         config: {
  *             fields: [
@@ -35797,13 +36169,15 @@ Ext.define('Ext.data.writer.Json', {
  *         }
  *     });
  *
- *     Ext.define("Product", {
+ *     Ext.define('Product', {
  *         extend: 'Ext.data.Model',
- *         fields: [
- *             'id', 'name'
- *         ],
+ *         config : {
+ *             fields: [
+ *                 'id', 'name'
+ *             ],
  *
- *         hasMany: 'OrderItem'
+ *             hasMany: 'OrderItem'
+ *         }
  *     });
  *
  * This may be a lot to take in - basically a User has many Orders, each of which is composed of several OrderItems.
@@ -35849,7 +36223,7 @@ Ext.define('Ext.data.writer.Json', {
  * and finally the Product associated with each OrderItem. Now we can read the data and use it as follows:
  *
  *     var store = Ext.create('Ext.data.Store', {
- *         model: "User"
+ *         model: 'User'
  *     });
  *
  *     store.load({
@@ -35857,11 +36231,11 @@ Ext.define('Ext.data.writer.Json', {
  *             //the user that was loaded
  *             var user = store.first();
  *
- *             console.log("Orders for " + user.get('name') + ":")
+ *             console.log('Orders for ' + user.get('name') + ':')
  *
  *             //iterate over the Orders for each User
  *             user.orders().each(function(order) {
- *                 console.log("Order ID: " + order.getId() + ", which contains items:");
+ *                 console.log('Order ID: ' + order.getId() + ', which contains items:');
  *
  *                 //iterate over the OrderItems for each Order
  *                 order.orderItems().each(function(orderItem) {
@@ -36149,7 +36523,7 @@ Ext.define('Ext.data.reader.Reader', {
     /**
      * @private
      * This will usually need to be implemented in a subclass. Given a generic data object (the type depends on the type
-     * of data we are reading), this function should return the object as configured by the Reader's 'root' meta data config.
+     * of data we are reading), this function should return the object as configured by the Reader's 'rootProperty' meta data config.
      * See XmlReader's getRoot implementation for an example. By default the same data object will simply be returned.
      * @param {Object} data The data object
      * @return {Object} The same data object
@@ -37076,7 +37450,7 @@ Ext.define('Ext.data.proxy.Proxy', {
     batch: function(options, /* deprecated */listeners) {
         var me = this,
             useBatch = me.getBatchActions(),
-            model = this.getModel(),
+            model = me.getModel(),
             batch,
             records;
 
@@ -37085,31 +37459,23 @@ Ext.define('Ext.data.proxy.Proxy', {
             // so convert to the single options argument syntax
             options = {
                 operations: options,
-                batch: {
-                    listeners: listeners
-                }
+                listeners: listeners
             };
 
         }
 
-        if (options.batch) {
-             if (options.batch.isBatch) {
-                 options.batch.setProxy(me);
-             } else {
-                 options.batch.proxy = me;
-             }
+        if (options.batch && options.batch.isBatch) {
+            batch = options.batch;
         } else {
-             options.batch = {
-                 proxy: me,
-                 listeners: options.listeners || {}
-             };
+            batch = new Ext.data.Batch(options.batch || {});
         }
 
-        if (!batch) {
-            batch = new Ext.data.Batch(options.batch);
-        }
+        batch.setProxy(me);
 
         batch.on('complete', Ext.bind(me.onBatchComplete, me, [options], 0));
+        if (options.listeners) {
+            batch.on(options.listeners);
+        }
 
         Ext.each(me.getBatchOrder().split(','), function(action) {
              records = options.operations[action];
@@ -37270,6 +37636,8 @@ Ext.define('Ext.data.proxy.Memory', {
             for (i; i < len; i++) {
                 recs[i].commit();
             }
+
+            operation.setCompleted();
             operation.setSuccessful();
 
             Ext.callback(callback, scope || this, [operation]);
@@ -37363,7 +37731,13 @@ Ext.define('Ext.data.proxy.WebStorage', {
 
         // WebStorage proxies dont use readers and writers
         reader: null,
-        writer: null
+        writer: null,
+
+        /**
+         * @cfg {Boolean} enablePagingParams This can be set to true if you want the webstorage proxy to comply
+         * to the paging params set on the store.
+         */
+        enablePagingParams: false
     },
 
     /**
@@ -37421,8 +37795,12 @@ Ext.define('Ext.data.proxy.WebStorage', {
             model      = this.getModel(),
             idProperty = model.getIdProperty(),
             params     = operation.getParams() || {},
+            sorters = operation.getSorters(),
+            filters = operation.getFilters(),
+            start = operation.getStart(),
+            limit = operation.getLimit(),
             length     = ids.length,
-            i, record;
+            i, record, collection;
 
         //read a single record
         if (params[idProperty] !== undefined) {
@@ -37435,6 +37813,26 @@ Ext.define('Ext.data.proxy.WebStorage', {
             for (i = 0; i < length; i++) {
                 records.push(this.getRecord(ids[i]));
             }
+
+            collection = Ext.create('Ext.util.Collection');
+
+            // First we comply to filters
+            if (filters && filters.length) {
+                collection.setFilters(filters);
+            }
+            // Then we comply to sorters
+            if (sorters && sorters.length) {
+                collection.setSorters(sorters);
+            }
+
+            collection.addAll(records);
+
+            if (this.getEnablePagingParams() && start !== undefined && limit !== undefined) {
+                records = collection.items.slice(start, start + limit);
+            } else {
+                records = collection.items.slice();
+            }
+
             operation.setSuccessful();
         }
 
@@ -37491,6 +37889,8 @@ Ext.define('Ext.data.proxy.WebStorage', {
             //newIds is a copy of ids, from which we remove the destroyed records
             newIds  = [].concat(ids),
             i;
+
+        operation.setStarted();
 
         for (i = 0; i < length; i++) {
             Ext.Array.remove(newIds, records[i].getId());
@@ -37581,6 +37981,10 @@ Ext.define('Ext.data.proxy.WebStorage', {
             field = fields[i];
             name  = field.getName();
 
+            if (field.getPersist() === false) {
+                continue;
+            }
+
             if (typeof field.getEncode() == 'function') {
                 data[name] = field.getEncode()(rawData[name], record);
             } else {
@@ -37650,16 +38054,6 @@ Ext.define('Ext.data.proxy.WebStorage', {
 
     /**
      * @private
-     * Returns the unique key used to store the current record counter for this proxy. This is used internally when
-     * realizing models (creating them when they used to be phantoms), in order to give each model instance a unique id.
-     * @return {String} The counter key
-     */
-    getRecordCounterKey: function() {
-        return Ext.String.format("{0}-counter", this.getId());
-    },
-
-    /**
-     * @private
      * Returns the array of record IDs stored in this Proxy
      * @return {Number[]} The record IDs. Each is cast as a Number
      */
@@ -37683,14 +38077,11 @@ Ext.define('Ext.data.proxy.WebStorage', {
     setIds: function(ids) {
         var obj = this.getStorageObject(),
             str = ids.join(","),
-            id  = this.getId(),
-            key = this.getRecordCounterKey();
+            id  = this.getId();
 
         obj.removeItem(id);
 
-        if (Ext.isEmpty(str)) {
-            obj.removeItem(key);
-        } else {
+        if (!Ext.isEmpty(str)) {
             obj.setItem(id, str);
         }
     },
@@ -37718,11 +38109,10 @@ Ext.define('Ext.data.proxy.WebStorage', {
 
         //remove all the records
         for (i = 0; i < len; i++) {
-            this.removeRecord(ids[i]);
+            this.removeRecord(ids[i], false);
         }
 
         //remove the supporting objects
-        obj.removeItem(this.getRecordCounterKey());
         obj.removeItem(this.getId());
     },
 
@@ -37745,12 +38135,12 @@ Ext.define('Ext.data.proxy.WebStorage', {
  * http://www.sencha.com/forum/showthread.php?220305-Problem-with-localstorage-store-and-model-with-hasMany-association
  * @date 20120629
  *
- * @requires Sencha Touch 2.0.1.1 SDK http://www.sencha.com/products/touch/
+ * @requires Sencha Touch 2.1.0 Beta SDK http://www.sencha.com/products/touch/
  * @requires Ext.data.proxy.WebStorage
  * 
  */
  
-Ext.define('Cs.component.cart.utils.WebStor', {
+Ext.define('Ext.ux.Cart.utils.WebStor', {
     override: 'Ext.data.proxy.WebStorage',
     
     read: function(operation, callback, scope) {
@@ -38556,6 +38946,29 @@ Ext.define('Ext.data.proxy.Ajax', {
 
     config: {
         /**
+         * @cfg {Boolean} withCredentials
+         * This configuration is sometimes necessary when using cross-origin resource sharing.
+         * @accessor
+         */
+        withCredentials: false,
+
+        /**
+         * @cfg {String} username
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the username.
+         * @accessor
+         */
+        username: null,
+
+        /**
+         * @cfg {String} password
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the password.
+         * @accessor
+         */
+        password: null,
+
+        /**
          * @property {Object} actionMethods
          * Mapping of action name to HTTP request method. In the basic AjaxProxy these are set to
          * 'GET' for 'read' actions and 'POST' for 'create', 'update' and 'destroy' actions.
@@ -38572,14 +38985,7 @@ Ext.define('Ext.data.proxy.Ajax', {
          * @cfg {Object} headers
          * Any headers to add to the Ajax request. Defaults to undefined.
          */
-        headers: {},
-
-        /**
-         * @cfg {Boolean} withCredentials
-         * This configuration is sometimes necessary when using cross-origin resource sharing.
-         * @accessor
-         */
-        withCredentials: false
+        headers: {}
     },
 
     /**
@@ -38587,19 +38993,23 @@ Ext.define('Ext.data.proxy.Ajax', {
      * @protected
      */
     doRequest: function(operation, callback, scope) {
-        var writer  = this.getWriter(),
-            request = this.buildRequest(operation);
+        var me = this,
+            writer  = me.getWriter(),
+            request = me.buildRequest(operation);
 
         request.setConfig({
-            headers        : this.getHeaders(),
-            timeout        : this.getTimeout(),
-            method         : this.getMethod(request),
-            callback       : this.createRequestCallback(request, operation, callback, scope),
-            scope          : this
+            headers  : me.getHeaders(),
+            timeout  : me.getTimeout(),
+            method   : me.getMethod(request),
+            callback : me.createRequestCallback(request, operation, callback, scope),
+            scope    : me,
+            proxy    : me
         });
 
-        if (operation.getWithCredentials() || this.getWithCredentials()) {
+        if (operation.getWithCredentials() || me.getWithCredentials()) {
             request.setWithCredentials(true);
+            request.setUsername(me.getUserName());
+            request.setPassword(me.getPassword());
         }
 
         // We now always have the writer prepare the request
@@ -38983,7 +39393,14 @@ Ext.define('Ext.data.Model', {
         /**
          * @method getIsErased Returns true if the record has been erased on the server.
          */
-        isErased: false
+        isErased: false,
+
+        /**
+         * @cfg {Boolean} useCache
+         * Change this to false if you want to ensure that new instances are created for each id. For example,
+         * this is needed when adding the same treenodes to multiple trees.
+         */
+        useCache: true
     },
 
     staticConfigs: [
@@ -39092,7 +39509,7 @@ Ext.define('Ext.data.Model', {
 
             callback = function(operation) {
                 if (operation.wasSuccessful()) {
-                    record = operation.getRecords()[0];
+                    record = operation.getRecords()[0] || null;
                     Ext.callback(config.success, scope, [record, operation]);
                 } else {
                     Ext.callback(config.failure, scope, [record, operation]);
@@ -39126,6 +39543,7 @@ Ext.define('Ext.data.Model', {
     constructor: function(data, id, raw, convertedData) {
         var me = this,
             cached = null,
+            useCache = this.getUseCache(),
             idProperty = this.getIdProperty();
 
         /**
@@ -39155,7 +39573,7 @@ Ext.define('Ext.data.Model', {
         }
 
         id = data[idProperty];
-        if (id || id === 0) {
+        if (useCache && (id || id === 0)) {
             cached = Ext.data.Model.cache[Ext.data.Model.generateCacheId(this, id)];
             if (cached) {
                 return cached.mergeData(convertedData || data || {});
@@ -39182,7 +39600,9 @@ Ext.define('Ext.data.Model', {
             me.id = me.getIdentifier().generate(me);
         }
 
-        Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)] = me;
+        if (useCache) {
+            Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)] = me;
+        }
 
         if (this.init && typeof this.init == 'function') {
             this.init();
@@ -39200,18 +39620,18 @@ Ext.define('Ext.data.Model', {
         var me = this,
             fields = me.getFields().items,
             ln = fields.length,
+            modified = me.modified,
             data = me.data,
             i, field, fieldName, value, convert;
 
         for (i = 0; i < ln; i++) {
             field = fields[i];
-            fieldName = field.getName();
-            convert = field.getConvert();
+            fieldName = field._name;
             value = rawData[fieldName];
 
-            if (value !== undefined && !me.isModified(fieldName)) {
-                if (convert) {
-                    value = convert.call(field, value, me);
+            if (value !== undefined && !modified.hasOwnProperty(fieldName)) {
+                if (field._convert) {
+                    value = field._convert(value, me);
                 }
 
                 data[fieldName] = value;
@@ -39230,10 +39650,11 @@ Ext.define('Ext.data.Model', {
      * @return {Ext.data.Model} this This Record
      */
     setData: function(rawData) {
-        var fields = this.fields.items,
+        var me = this,
+            fields = me.fields.items,
             ln = fields.length,
             isArray = Ext.isArray(rawData),
-            data = this._data = this.data = {},
+            data = me._data = me.data = {},
             i, field, name, value, convert, id;
 
         if (!rawData) {
@@ -39242,8 +39663,8 @@ Ext.define('Ext.data.Model', {
 
         for (i = 0; i < ln; i++) {
             field = fields[i];
-            name = field.getName();
-            convert = field.getConvert();
+            name = field._name;
+            convert = field._convert;
 
             if (isArray) {
                 value = rawData[i];
@@ -39251,18 +39672,18 @@ Ext.define('Ext.data.Model', {
             else {
                 value = rawData[name];
                 if (typeof value == 'undefined') {
-                    value = field.getDefaultValue();
+                    value = field._defaultValue;
                 }
             }
 
             if (convert) {
-                value = convert.call(field, value, this);
+                value = field._convert(value, me);
             }
 
             data[name] = value;
         }
 
-        id = this.getId();
+        id = me.getId();
         if (this.associations.length && (id || id === 0)) {
             this.handleInlineAssociationData(rawData);
         }
@@ -39312,8 +39733,10 @@ Ext.define('Ext.data.Model', {
         // exist on the record instance.
         this.internalId = id;
 
-        delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(this, currentId)];
-        Ext.data.Model.cache[Ext.data.Model.generateCacheId(this)] = this;
+        if (this.getUseCache()) {
+            delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(this, currentId)];
+            Ext.data.Model.cache[Ext.data.Model.generateCacheId(this)] = this;
+        }
     },
 
     /**
@@ -40014,7 +40437,9 @@ Ext.define('Ext.data.Model', {
     destroy: function() {
         var me = this;
         me.notifyStores('afterErase', me);
-        delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)];
+        if (me.getUseCache()) {
+            delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)];
+        }
         me.raw = me.stores = me.modified = null;
         me.callParent(arguments);
     },
@@ -41292,7 +41717,7 @@ Ext.define('Ext.data.Store', {
      * @param {Boolean} silent Prevent the `clear` event from being fired.
      */
     removeAll: function(silent) {
-        if (silent !== true) {
+        if (silent !== true && this.eventFiringSuspended !== true) {
             this.fireAction('clear', [this], 'doRemoveAll');
         } else {
             this.doRemoveAll.call(this, true);
@@ -41633,7 +42058,7 @@ Ext.define('Ext.data.Store', {
      */
     filter: function(property, value, anyMatch, caseSensitive) {
         var data = this.data,
-            filter = property ? ((Ext.isFunction(property) || property.isFilter) ? property : {
+            filter = property ? ((Ext.isFunction(property) || Ext.isArray(property) || property.isFilter) ? property : {
                 property     : property,
                 value        : value,
                 anyMatch     : anyMatch,
@@ -41724,8 +42149,16 @@ Ext.define('Ext.data.Store', {
      * Returns true if this store is currently filtered
      * @return {Boolean}
      */
-    isFiltered: function() {
+    isFiltered : function () {
         return this.data.filtered;
+    },
+
+    /**
+     * Returns true if this store is currently sorted
+     * @return {Boolean}
+     */
+    isSorted : function () {
+        return this.data.sorted;
     },
 
     getSorters: function() {
@@ -42177,17 +42610,22 @@ Ext.define('Ext.data.Store', {
             syncRemovedRecords = me.getSyncRemovedRecords(),
             currentRecords = data.all.slice(),
             removed = me.removed,
-            ln = currentRecords.length,
+            ln = currentRecords.length, 
+            ln2 = records.length,
+            ids = {},
             i, record;
 
         if (operation.getAddRecords() !== true) {
+            for (i = 0; i < ln2; i++) {
+                ids[records[i].id] = true;
+            }
             for (i = 0; i < ln; i++) {
                 record = currentRecords[i];
                 record.unjoin(me);
 
                 // If the record we are removing is not part of the records we are about to add to the store then handle
                 // the destroying or removing of the record to avoid memory leaks.
-                if (records.indexOf(record) === -1) {
+                if (ids[record.id] !== true) {
                     if (syncRemovedRecords && record.phantom !== true) {
                         removed.push(record);
                     }
@@ -42196,11 +42634,11 @@ Ext.define('Ext.data.Store', {
                     }
                 }
             }
+
             data.clear();
             // This means we have to fire a clear event though
             me.fireEvent('clear', me);
         }
-
         if (records && records.length) {
             // Now lets add the records without firing an addrecords event
             me.suspendEvents();
@@ -42340,6 +42778,11 @@ Ext.define('Ext.data.Store', {
      */
     previousPage: function(options) {
         this.loadPage(this.currentPage - 1, options);
+    },
+
+    destroy: function() {
+        Ext.data.StoreManager.unregister(this);
+        this.callParent(arguments);
     }
 
 });
@@ -42350,21 +42793,21 @@ Ext.define('Ext.data.Store', {
  * @fileOverview Config for product data model
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120629
+ * @date 20120725
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.data.Model
- * @requires Cs.component.cart.model.Cart
+ * @requires Ext.ux.Cart.model.Cart
  * 
  */
 
-Ext.define('Cs.component.cart.model.Product', {
+Ext.define('Ext.ux.Cart.model.Product', {
     extend: 'Ext.data.Model',
 
     config: {
         fields: [
-            {name: 'id', type: 'string'},// This id will be generated as unique identifier
+            {name: 'id', type: 'string'},// Generated unique product identifier
             {name: 'product_id', type: 'string'},
             {name: 'price', type: 'float'},
             {name: 'quantity', type: 'integer'},
@@ -42375,7 +42818,7 @@ Ext.define('Cs.component.cart.model.Product', {
             type: 'uuid'
         },
 
-        belongsTo: 'Cs.component.cart.model.Cart'
+        belongsTo: 'Ext.ux.Cart.model.Cart'
     }
 });
 
@@ -42385,31 +42828,32 @@ Ext.define('Cs.component.cart.model.Product', {
  * @fileOverview Config for cart data model
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120629
+ * @date 20120725
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.data.Model
  * @requires Ext.data.proxy.LocalStorage
  * @requires Ext.data.identifier.Uuid
- * @requires Cs.component.cart.model.Product
+ * @requires Ext.ux.Cart.model.Product
  * 
  */
 
-Ext.define('Cs.component.cart.model.Cart', {
+Ext.define('Ext.ux.Cart.model.Cart', {
     extend: 'Ext.data.Model',
 
     requires: [
         'Ext.data.proxy.LocalStorage',
-        'Cs.component.cart.model.Product',
+        'Ext.ux.Cart.model.Product',
         'Ext.data.identifier.Uuid'
     ],
 
     config: {
         fields: [
-            {name: 'id', type: 'string'},
-            {name: 'created', type: 'date'},
-            {name: 'active', type: 'boolean'}
+            {name: 'id', type: 'string'},// Generated unique cart identifier
+            {name: 'created', type: 'date'},// Created date
+            {name: 'active', type: 'boolean'},// Cart status
+            {name: 'submited', type: 'integer'},// Count of cart submits
         ],
 
         idProperty: 'id',
@@ -42421,13 +42865,13 @@ Ext.define('Cs.component.cart.model.Cart', {
         associations: [
             {
                 type: 'hasMany',
-                model: 'Cs.component.cart.model.Product',
+                model: 'Ext.ux.Cart.model.Product',
                 associationKey: 'products',
                 foreignKey: 'cart_id',
                 name: 'products',
                 autoLoad: true,
                 store: {
-                    model: 'Cs.component.cart.model.Product',
+                    model: 'Ext.ux.Cart.model.Product',
                     autoLoad: true,
 
                     proxy: {
@@ -42446,26 +42890,26 @@ Ext.define('Cs.component.cart.model.Cart', {
  * @fileOverview Config for cart LocalStorage store
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120629
+ * @date 20120725
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.data.Store
  * @requires Ext.data.proxy.LocalStorage
- * @requires Cs.component.cart.model.Cart
+ * @requires Ext.ux.Cart.model.Cart
  * 
  */
 
-Ext.define('Cs.component.cart.store.Cart', {
+Ext.define('Ext.ux.Cart.store.Cart', {
     extend: 'Ext.data.Store',
 
     requires: [
         'Ext.data.proxy.LocalStorage',
-        'Cs.component.cart.model.Cart'
+        'Ext.ux.Cart.model.Cart'
     ],
 
     config: {
-        model: 'Cs.component.cart.model.Cart',
+        model: 'Ext.ux.Cart.model.Cart',
 
         proxy: {
             type: 'localstorage',
@@ -42475,13 +42919,13 @@ Ext.define('Cs.component.cart.store.Cart', {
 });
 
 /**
- * @filename Cart.js
- * @name Simple shopping cart for Sencha Touch
- * @fileOverview Shopping cart manager singleton
+ * @filename Core.js
+ * @name Simple shopping cart for Sencha Touch singleton prototype
+ * @fileOverview Shopping cart manager singleton prototype
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120719
- * @version 1.0.1
+ * @date 20120725
+ * @version 1.1
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
@@ -42490,28 +42934,26 @@ Ext.define('Cs.component.cart.store.Cart', {
  * @requires Ext.data.Store
  * @requires Ext.data.StoreManager
  * @requires Ext.mixin.Observable
- * @requires Ext.data.proxy.WebStorage !!! Important. Fix for hasMany issue in 2.0.1.1
- * @requires Cs.component.cart.store.Cart
- * @requires Cs.component.cart.controller.Indicator
- * @requires Cs.component.cart.controller.Panel
+ * @requires Ext.data.proxy.WebStorage !!! Important. Fix for hasMany issue in 2.1.0 Beta
+ * @requires Ext.ux.Cart.store.Cart
+ * @requires Ext.ux.Cart.controller.Indicator
+ * @requires Ext.ux.Cart.controller.Panel
  * 
  */
 
-Ext.define('Cs.component.cart.src.Cart', {
-    alternateClassName: 'Cs.Cart', // Use this shortcut for access singleton in your app
+Ext.define('Ext.ux.Cart.src.Core', {
     mixins: {
         observable: 'Ext.mixin.Observable'
     },
-    singleton: true,
-
+    
     requires: [
         'Ext.Logger',
         'Ext.MessageBox',
         'Ext.data.Store',
         'Ext.data.StoreManager',        
-        'Cs.component.cart.utils.WebStor',// Fix for hasMany issue in 2.0.1.1
+        'Ext.ux.Cart.utils.WebStor',// Fix for hasMany issue in 2.1.0 Beta
                                           // @todo Looking for next SDK version and remove
-        'Cs.component.cart.store.Cart'
+        'Ext.ux.Cart.store.Cart'// @todo Move cart store require to controller
     ],
 	
     /**
@@ -42527,6 +42969,11 @@ Ext.define('Cs.component.cart.src.Cart', {
      */
 
     config: {
+        /**
+         * @cfg {String} version Current shopping cart core version
+         * @private
+         */
+        version: '1.1',
         
         /**
          * @cfg {Ext.data.Model} activeCart Link to current opened cart record
@@ -42546,9 +42993,17 @@ Ext.define('Cs.component.cart.src.Cart', {
         currency: 'MONEY',
         
         /**
+         * @cfg {Object} models Cart models names
+         */
+        models: {
+            cart: 'Ext.ux.Cart.model.Cart',
+            product: 'Ext.ux.Cart.model.Product'
+        },
+        
+        /**
          * @cfg {String/Ext.data.Store} store Cart store
          */
-        store: 'Cs.component.cart.store.Cart',
+        store: 'Ext.ux.Cart.store.Cart',
 
         /**
          * @cfg {Boolean} encodeEnabled Send encoded cart data to callback
@@ -42566,7 +43021,18 @@ Ext.define('Cs.component.cart.src.Cart', {
          * @cfg {string} productsStore 
          * Store with products (from app)
          */
-        productsStore: null
+        productsStore: null,
+        
+        formats: {
+            ARCH_DATE: 'd F Y'
+        },
+        
+        strings: {
+            ARCH_CLEAR_CONFIRM: 'Are you want to clear carts archive?',
+            ARCH_RESTORE_CONFIRM: 'Are you want to restore cart form {0}?',
+            CART_REMOVE_PRODUCT: 'Are you want to remove this product from cart?',
+            CART_CLEAR_CONFIRM: 'Are you want to remove all products from cart?'
+        }
     },
     
     /**
@@ -42580,12 +43046,14 @@ Ext.define('Cs.component.cart.src.Cart', {
 	
     /**
      * Create new cart
+     * @method create
      * @private
      */
     create: function() {
-        var newCart = Ext.create('Cs.component.cart.model.Cart', {
+        var newCart = Ext.create(this.getModels().cart, {
             'created': new Date(),
-            'active': true
+            'active': true,
+            'submited': 0
         });
         
         var store = this.getStore();
@@ -42593,23 +43061,24 @@ Ext.define('Cs.component.cart.src.Cart', {
         store.add(newCart);
         store.sync();
         store.load();
-        this.onCartChanged();
     },
     
     /**
      * Deactivate current active cart
+     * @method deactivate
      */
     deactivate: function() {
         this.getActiveCart().set('active', false);
-        this.getStore().sync();
+        var store = this.getStore();
+        store.sync();
 
         // Create and init new empty cart
-        this.onStoreLoad();
+        store.load();
     },
 
     /**
      * Add new record to cart (or update existed)
-     * Shortcut to add method
+     * Shortcut to update method
      * @method add
      * @param {String} id Unique product Id
      * @param {Integer} qty Item quantity
@@ -42648,7 +43117,7 @@ Ext.define('Cs.component.cart.src.Cart', {
         } else {
 
             // Create new record
-            activeProducts.add(Ext.create('Cs.component.cart.model.Product', {
+            activeProducts.add(Ext.create(this.getModels().product, {
                 'product_id': id,
                 'price': this.getProductById(id).get('price'),
                 'quantity': qty
@@ -42659,17 +43128,17 @@ Ext.define('Cs.component.cart.src.Cart', {
     },
 
     /**
-     * Remove product record from cart
+     * Remove product record from cart by Id
      * @method remove
      * @param {String} id Product Id
      */
     remove: function(id) {
-        var activeProducts = this.getActiveProducts();
+        var activeProducts = this.getActiveProducts();        
         var record = activeProducts.findRecord('product_id', id);
         
-        if (record !== null) {
+        if (record !== -1) {
             activeProducts.removeAt(activeProducts.indexOf(record));
-            this.onCartChanged();
+            this.onCartChanged();            
         }
     },
     
@@ -42704,33 +43173,56 @@ Ext.define('Cs.component.cart.src.Cart', {
 				
         // @todo Move confirmation text to cart config
         Ext.Msg.confirm(null, 
-                'Are you want to clean cart after submit?', 
-                function(answer) {
-
+                        'Are you want to clean cart after submit?', 
+                        function(answer) {
+            
+            // Get submited value
+            var cart = self.getActiveCart();
+            var submited = cart.get('submited');
+            
+            // Set new submited value
+            cart.set('submited', submited+1);
+            self.getStore().sync();
+            
             if (answer === 'yes') {
+                
+                // Deactivate current cart
                 self.deactivate();
             }
             
             // Call predefined submit action
             self.fireAction('submit', [cartData], callback, scope)
-        }); 
+        });
     },
 	
     /**
      * Return count of items (products) in active cart
-     * @method getItemsCount
+     * @method getProductsCount
+     * @return {Integer} count
      */
-    getItemsCount: function() {
+    getProductsCount: function() {
         return this.getActiveProducts().getCount();
     },
 	
     /**
      * Get total sum of products in active cart
      * @method getTotalSum
+     * @param {String/undefined} cartId Cart id
+     * @return {Float} total
      */
-    getTotalSum: function() {
-        var cartAll = this.getActiveProducts().data.all;
+    getTotalSum: function(cartId) {
+        var cartAll = [];
         var total = 0;
+        
+        if (typeof cartId === 'undefined') {
+            cartAll = this.getActiveProducts().data.all;
+        } else {
+            var cart = this.getStore().findRecord('id', cartId);
+            
+            if (cart) {
+                cartAll = cart.products().data.all;
+            }            
+        }
         
         for (var i in cartAll) {
             var cartItem = cartAll[i];            
@@ -42741,8 +43233,7 @@ Ext.define('Cs.component.cart.src.Cart', {
     },
     
     /**
-     * Get product record by Id
-     * from products store
+     * Get product record by Id from products store
      * @param {String} id Product Id
      * @return {Object/null} Product record object
      * @method getProductById
@@ -42765,8 +43256,10 @@ Ext.define('Cs.component.cart.src.Cart', {
     
     /**
      * Build data Array for cart panel list store
+     * @private
      * @method buildCartData
-     * @param {Boolean} plain Enable plain cartData output
+     * @param {Boolean} plain Enable plain cartData array output
+     * @return {Array} cartData
      */
     buildCartData: function(plain) {
         var cartAll = this.getActiveProducts().data.all;
@@ -42806,6 +43299,111 @@ Ext.define('Cs.component.cart.src.Cart', {
     },
     
     /**
+     * Check for archived carts
+     * @method isArchive
+     * @return {Boolean}
+     */    
+    isArchive: function() {
+        var record = this.getStore().find('active', false);
+        
+        if (record === -1) {
+            return false;
+        } else {
+            return true;
+        }
+    },
+    
+    /**
+     * Build data Array for archive store
+     * @private
+     * @method buildArchiveData
+     * @return {Array} archData
+     */
+    buildArchiveData: function() {
+        var carts = this.getStore().data.all;
+        var archData = [];
+        
+        for (var i in carts) {
+            var cart = carts[i];
+            
+            if (cart.get('active') === false) {
+                archData[archData.length] = {
+                    'id': cart.get('id'),
+                    'created': cart.get('created'),
+                    'total': Cart.getTotalSum(cart.get('id')) + ' ' + 
+                             Cart.getCurrency(),
+                    'submited': cart.get('submited')
+                }
+            }
+        }
+        
+        return archData;
+    }, 
+    
+    /**
+     * Restore archived cart by Id
+     * @method restore
+     * @param {String} id Cart id
+     */
+    restore: function(id) {
+        var store = this.getStore();
+        
+        if (this.getProductsCount() === 0) {
+            
+            // Remove current active empty cart
+            store.removeAt(store.indexOf(this.getActiveCart()));
+        } else {
+            
+            // Deactivate active non empty cart
+            this.getActiveCart().set('active', false);
+        }
+        
+        // Apply changes
+        store.sync();
+        
+        // Find cart record for restore
+        var cart = store.findRecord('id', id);
+
+        if (cart) {
+            cart.set('active', true);
+            store.sync();
+        }
+
+        this.onStoreLoad();
+        this.onCartChanged();
+    },
+    
+    /**
+     * Clear all archived carts
+     * @method clearArchive
+     */
+    clearArchive: function() {
+        var store = this.getStore();        
+        
+        // Work with cloned store because we will be change the original
+        var carts = Ext.clone(store.data.all);
+        
+        for (var i in carts) {
+            var cart = carts[i];
+            
+            if (cart.get('active') === false) {
+                var products = cart.products();
+                
+                // Remove all products from archived cart
+                products.removeAll();
+                products.sync();
+                
+                // Remove archived cart
+                store.removeAt(store.indexOf(cart));
+                store.sync();
+            }
+        }
+        
+        // Refresh carts store
+        store.load();
+    },
+    
+    /**
      * Called when cart store is loaded
      * @private
      */
@@ -42814,15 +43412,18 @@ Ext.define('Cs.component.cart.src.Cart', {
         
         // Search for active cart in store
         var activeCart = store.findRecord('active', true);
-		
-        // Check if store not empty and get the active cart record
-        if (!store.getCount() || activeCart === null) {
-            this.setActiveCart(null);
-            this.setActiveProducts(null);
-            this.create();
-        } else {
+        
+        // Looking for active cart record
+        if (activeCart !== null) {
             this.setActiveCart(activeCart);
             this.setActiveProducts(activeCart.products());
+            this.fireEvent('changed', [activeCart]);            
+        } else {
+            this.setActiveCart(null);
+            this.setActiveProducts(null);
+            
+            // If active cart not found - create one
+            return this.create();
         }
     },
     
@@ -42832,8 +43433,8 @@ Ext.define('Cs.component.cart.src.Cart', {
     applyStore: function(storeName) {
 		
         // Create and register cart store
-        var store = Ext.create('Cs.component.cart.store.Cart');
-        
+        var store = Ext.create(storeName);
+
         if (store && Ext.isObject(store) && store.isStore) {
 
             // Listen for load event of cart store
@@ -42843,10 +43444,10 @@ Ext.define('Cs.component.cart.src.Cart', {
             });
         } else {
 
-            }
+        }
 
-            return store;
-	},
+        return store;
+    },
 	
     /**
      * @private
@@ -42902,7 +43503,30 @@ Ext.define('Cs.component.cart.src.Cart', {
         }
     }
 });
+/**
+ * @filename Cart.js
+ * @name Shopping cart manager singleton
+ * @fileOverview Define a singltone from core class
+ * 
+ * @author Constantine V. Smirnov kostysh(at)gmail.com
+ * @date 20120725
+ * @license GNU GPL v3.0
+ *
+ * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
+ * @requires Ext.ux.Cart.src.Core
+ * 
+ */
 
+Ext.define('Ext.ux.Cart.src.Cart', {
+    extend: 'Ext.ux.Cart.src.Core',
+    singleton: true,
+    
+    // Use this shortcuts for access singleton in your app
+    alternateClassName: [
+        'Cart', 
+        'Ext.ux.Cart'
+    ]
+});
 Ext.define('Cart.model.Item', {
     extend: 'Ext.data.Model',
 
@@ -42921,30 +43545,53 @@ Ext.define('Cart.model.Item', {
         belongsTo: 'Cart.model.Categories'
     }
 });
+Ext.define('Cart.model.Categories', {
+    extend: 'Ext.data.Model',
+
+    requires: [
+        'Cart.model.Item'
+    ],
+
+    config: {
+        fields: [
+            {name: 'id', type: 'integer'},
+            {name: 'text', type: 'string'},
+            {name: 'leaf', type: 'boolean'}
+        ],
+
+        idProperty: 'id',
+
+        associations: [
+            {
+                type: 'hasMany',
+                model: 'Cart.model.Item',
+                associationKey: 'products',
+                name: 'getProducts',
+                autoLoad: true
+            }
+        ]
+    }
+});
 /**
  * @filename Indicator.js
  * @name Controller for shopping cart Indicator
  * @fileOverview Controller for Indicator component
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120628
+ * @date 20120725
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.app.Controller
- * @requires Cs.component.cart.src.Cart Definition of Cart singleton
- * @requires Cs.component.cart.Indicator Indicator view
- * @requires Cs.component.cart.Panel Cart panel view 
+ * @requires Ext.ux.Cart.src.Cart Cart singleton
+ * @requires Ext.ux.Cart.Indicator Indicator view
+ * @requires Ext.ux.Cart.Panel Cart panel view 
  * 
  */
 
-Ext.define('Cs.component.cart.controller.Indicator', {
+Ext.define('Ext.ux.Cart.controller.Indicator', {
     extend: 'Ext.app.Controller',
 
-    requires: [
-        'Cs.component.cart.src.Cart'
-    ],
-    
     /**
      * @event updated
      * Fires whenever the Indicator badges are updated
@@ -42952,18 +43599,25 @@ Ext.define('Cs.component.cart.controller.Indicator', {
     
     config: {
         views: [
-            'Cs.component.cart.Indicator',
-            'Cs.component.cart.Panel'
+            'Ext.ux.Cart.Indicator',
+            'Ext.ux.Cart.Panel'
         ],
         
+        panelView: 'Ext.ux.Cart.Panel',
+        
         refs: {
-            cartBtn: '#cartBtn'
+            cartBtn: '#cartBtn',
+            cartPanel: '#cartPanel'
         },
 
         control: {
             cartBtn: {
                 initialize: 'initializeIndicator',
                 tap: 'onBtnTap'            
+            },
+            
+            cartPanel: {
+                closed: 'refreshIndicator'
             }
         }
     },
@@ -42974,7 +43628,7 @@ Ext.define('Cs.component.cart.controller.Indicator', {
     initializeIndicator: function() {
         
         // Subscribe to Cart changes
-        Cs.Cart.on({
+        Cart.on({
             scope: this,
             changed: this.refreshIndicator
         });
@@ -42987,14 +43641,16 @@ Ext.define('Cs.component.cart.controller.Indicator', {
      * @private
      */
     refreshIndicator: function() {
-        var cartBtn = this.getCartBtn(),        
-            itemsCount = Cs.Cart.getItemsCount();
+        var cartBtn = this.getCartBtn();
+        cartBtn.enable();
+        
+        var itemsCount = Cart.getProductsCount();
         
         if (itemsCount > 0) {
             
             // View cart info on badges
             cartBtn.setBadgeText(itemsCount);
-            cartBtn.setTotalBadgeText(Cs.Cart.getTotalSum());            
+            cartBtn.setTotalBadgeText(Cart.getTotalSum());            
         } else {
             
             // Hide all badges
@@ -43008,28 +43664,160 @@ Ext.define('Cs.component.cart.controller.Indicator', {
     /**
      * @private
      */
-    onBtnTap: function() {
-        var cartBtn = this.getCartBtn();
+    onBtnTap: function(cartBtn) {
         
-        // Disable indicator button while panel is open
-        cartBtn.setDisabled(true);
+        // Disable indicator button while cart  is open
+        cartBtn.disable();
         
         // Use created view or create new
-        var cartPanel = Ext.getCmp('cartPanel') ||
-                        Ext.create('Cs.component.cart.Panel');
-        
-        cartPanel.on({
-            single: true,
-            
-            // Enable indicator then cart panel is closed
-            closed: function() {
-                cartBtn.setDisabled(false);
-            }
-        });
-        
+        var cartPanel = this.getCartPanel() ||
+                        Ext.create(this.getPanelView());
+                
         // Add cart panel to viewport and show 
         Ext.Viewport.add(cartPanel);
         cartPanel.show();
+    }
+});
+
+/**
+ * @filename Archive.js
+ * @name Archive panel controller
+ * @fileOverview Config for archive panel controller
+ * 
+ * @author Constantine V. Smirnov kostysh(at)gmail.com
+ * @date 20120725
+ * @license GNU GPL v3.0
+ *
+ * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
+ * @requires Ext.app.Controller  
+ * @requires Ext.ux.Cart.src.Cart
+ * @requires Ext.data.Store
+ * @requires Ext.MessageBox
+ * @requires Ext.Template
+ * 
+ */
+
+Ext.define('Ext.ux.Cart.controller.Archive', {
+    extend: 'Ext.app.Controller',
+
+    requires: [
+        'Ext.MessageBox',
+        'Ext.data.Store',
+        'Ext.Template'
+    ],
+    
+    config: {
+        refs: {
+            archPanel: '#archPanel',
+            closeBtn: '#archPanel #closeArchBtn',
+            clearBtn: '#archPanel #clearArchBtn',
+            archList: '#archPanel #archList'
+        },
+
+        control: {
+            archPanel: {
+                initialize: 'initializeArchPanel',
+                painted: 'onArchPanelPainted'
+            },
+            
+            closeBtn: {
+                tap: 'onCloseBtnTap'
+            },
+            
+            clearBtn: {
+                tap: 'onClearBtnTap'
+            },
+            
+            archList: {
+                disclose: 'onArchListDisclose'
+            }
+        }
+    },
+    
+    /**
+     * Called when archive panel is initialized
+     */
+    initializeArchPanel: function() {
+                
+        // Subscribe to Cart changed event
+        Cart.on({
+            scope: this,
+            changed: this.onArchPanelPainted
+        });
+    },
+    
+    /**
+     * @private
+     */
+    convertDate: function(date) {
+        return Ext.Date.format(date, Cart.getFormats().ARCH_DATE);
+    },
+    
+    /**
+     * Called when archive panel is painted
+     */
+    onArchPanelPainted: function() {
+        var archList = this.getArchList();        
+        archList.setStore(Ext.create('Ext.data.Store', {
+            fields: [
+                {name: 'id', type: 'string'},
+                {name: 'created', convert: this.convertDate},
+                {name: 'total', type: 'string'},
+                {name: 'submited', type: 'integer'}
+            ],
+            data: Cart.buildArchiveData(),
+            sorters: [
+                {
+                    property: 'submited',
+                    direction: 'DESC'
+                }
+            ]
+        }));        
+    },
+    
+    /**
+     * Called when close button is tapped
+     */
+    onCloseBtnTap: function() {
+        var archPanel = this.getArchPanel();
+        archPanel.hide();
+        archPanel.fireEvent('closed');
+    },
+    
+    /**
+     * Called when clear button is tapped 
+     */
+    onClearBtnTap: function() {
+        var self = this;
+        
+        // Show clear confirmation dialog
+        Ext.Msg.confirm(null, 
+                        Cart.getStrings().ARCH_CLEAR_CONFIRM, 
+                        function(answer) {
+
+            if (answer === 'yes') {
+                Cart.clearArchive();
+                self.onCloseBtnTap();
+            }
+        });        
+    },
+    
+    /**
+     * Called when archive list disclosed
+     */
+    onArchListDisclose: function(list, record) {
+        var self = this;
+        
+        var dialog = new Ext.Template(Cart.getStrings().ARCH_RESTORE_CONFIRM);
+        Ext.Msg.confirm(null, 
+                        dialog.apply([record.get('created')]), 
+                        function(answer) {
+
+            if (answer === 'yes') {
+                Cart.restore(record.get('id'));
+                self.onCloseBtnTap();
+            } 
+        });
     }
 });
 
@@ -43039,18 +43827,18 @@ Ext.define('Cs.component.cart.controller.Indicator', {
  * @fileOverview Config for shopping cart panel controller
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120719
+ * @date 20120725
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.app.Controller  
- * @requires Cs.component.cart.src.Cart
+ * @requires Ext.ux.Cart.src.Cart
  * @requires Ext.data.Store
  * @requires Ext.MessageBox
  * 
  */
 
-Ext.define('Cs.component.cart.controller.Panel', {
+Ext.define('Ext.ux.Cart.controller.Panel', {
     extend: 'Ext.app.Controller',
 
     requires: [
@@ -43069,6 +43857,13 @@ Ext.define('Cs.component.cart.controller.Panel', {
      */
 	
     config: {
+        views: [
+            'Ext.ux.Cart.Panel',
+            'Ext.ux.Cart.Archive'
+        ],
+        
+        archiveView: 'Ext.ux.Cart.Archive',
+        
         refs: {
             cartPanel: '#cartPanel',
             closeBtn: '#cartPanel #closeBtn',
@@ -43076,7 +43871,9 @@ Ext.define('Cs.component.cart.controller.Panel', {
             itemSpinner: '#cartPanel spinnerfield',
             totalSum: '#cartPanel #totalSum',
             clearBtn: '#cartPanel #clearBtn',
-            submitBtn: '#cartPanel #submitBtn'
+            submitBtn: '#cartPanel #submitBtn',
+            archPanel: '#archPanel',
+            archBtn: '#archBtn'
         },
 
         control: {
@@ -43099,6 +43896,15 @@ Ext.define('Cs.component.cart.controller.Panel', {
             
             submitBtn: {
                 tap: 'onSubmitBtnTap'
+            },
+            
+            archPanel: {
+                closed: 'refreshArchBtn'
+            },
+            
+            archBtn: {
+                initialize: 'initializeArchBtn',
+                tap: 'onArchBtnTap'            
             }
         }
     },
@@ -43109,7 +43915,7 @@ Ext.define('Cs.component.cart.controller.Panel', {
     initializeCartPanel: function() {
                 
         // Subscribe to Cart changed event
-        Cs.Cart.on({
+        Cart.on({
             scope: this,
             changed: this.onCartPanelPainted
         });
@@ -43126,7 +43932,7 @@ Ext.define('Cs.component.cart.controller.Panel', {
         }
 
         var itemsListView = this.getItemsList();
-        var itemsData = Cs.Cart.buildCartData();
+        var itemsData = Cart.buildCartData();
         
         // Disable some buttons if cart is empty
         if (itemsData.length === 0) {
@@ -43145,8 +43951,8 @@ Ext.define('Cs.component.cart.controller.Panel', {
         
         itemsListView.setStore(cartItemsStore);
         
-        this.getTotalSum().setHtml(Cs.Cart.getTotalSum() + ' ' + 
-                                   Cs.Cart.getCurrency());
+        this.getTotalSum().setHtml(Cart.getTotalSum() + ' ' + 
+                                   Cart.getCurrency());
         
         this.fireEvent('itemslistupdated');
     },
@@ -43172,14 +43978,14 @@ Ext.define('Cs.component.cart.controller.Panel', {
         
         // Save updated qty value
         // spinField has id equal product_id
-        Cs.Cart.update(id, qty);
+        Cart.update(id, qty);
     },
     
     /**
      * Remove item from cart by id
      */
     removeItem:  function(id) {
-        Cs.Cart.remove(id);
+        Cart.remove(id);
     },
     
     /**
@@ -43192,9 +43998,8 @@ Ext.define('Cs.component.cart.controller.Panel', {
         if (qty === 0) {
             
             // Show deletion confirmation dialog if current qty === 0
-            // @todo Move confirmation string to config
             Ext.Msg.confirm(null, 
-                            'Are you want to remove this product from cart?', 
+                            Cart.getStrings().CART_REMOVE_PRODUCT, 
                             function(answer) {
                             
                 if (answer === 'yes') {
@@ -43223,15 +44028,13 @@ Ext.define('Cs.component.cart.controller.Panel', {
     onClearBtnTap: function() {
         var self = this;
         
-        
         // Show clear confirmation dialog
-        // @todo Move clear confirmation string to config
         Ext.Msg.confirm(null, 
-                        'Are you want to remove all products from cart?', 
+                        Cart.getStrings().CART_CLEAR_CONFIRM, 
                         function(answer) {
 
             if (answer === 'yes') {
-                Cs.Cart.removeAll();
+                Cart.removeAll();
                 self.onCloseBtnTap();
             }
         });        
@@ -43243,7 +44046,56 @@ Ext.define('Cs.component.cart.controller.Panel', {
     onSubmitBtnTap: function() {
         
         // Submit cart data with callback and close cart panel
-        Cs.Cart.submit(this.onCloseBtnTap, this);
+        Cart.submit(this.onCloseBtnTap, this);
+    },
+    
+    /**
+     * Called when archive button is initialized
+     */
+    initializeArchBtn: function() {
+        
+        // Subscribe to Cart changes
+        Cart.on({
+            scope: this,
+            changed: this.refreshArchBtn
+        });
+        
+        // Refresh Indicator badges on start
+        this.refreshArchBtn();
+    },
+    
+    /**
+     * Called when cart is changed
+     */
+    refreshArchBtn: function() {
+        var archBtn = this.getArchBtn();
+        
+        if (Cart.isArchive()) {
+            
+            // Enable cart archive button
+            archBtn.enable();
+        } else {
+            
+            // Disable cart archive button
+            archBtn.disable();
+        }
+    },
+    
+    /**
+     * Called when archive button is tapped
+     */
+    onArchBtnTap: function(archBtn) {
+                
+        // Disable archive button while archive panel is open
+        archBtn.disable();
+        
+        // Use created view or create new
+        var archPanel = this.getArchPanel() ||
+                        Ext.create(this.getArchiveView());
+                
+        // Add cart panel to viewport and show 
+        Ext.Viewport.add(archPanel);
+        archPanel.show();
     }
 });
 
@@ -43319,7 +44171,7 @@ Ext.define('Cs.component.cart.controller.Panel', {
  *             {
  *                 align: 'right',
  *                 text: 'Another button'
- *             },
+ *             }
  *         ]
  *     });
  *
@@ -43525,9 +44377,10 @@ Ext.define('Ext.TitleBar', {
         //set the min/max width of the left button
         var leftBox = this.leftBox,
             leftButton = leftBox.down('button'),
+            singleButton = leftBox.getItems().getCount() == 1,
             leftBoxWidth, maxButtonWidth;
 
-        if (leftButton) {
+        if (leftButton && singleButton) {
             if (leftButton.getWidth() == null) {
                 leftButton.renderElement.setWidth('auto');
             }
@@ -43573,109 +44426,6 @@ Ext.define('Ext.TitleBar', {
 
         if (this.isPainted()) {
             this.refreshTitlePosition();
-        }
-    }
-});
-
-/**
- * @filename Indicator.js
- * @name Indicator for Simple Cart 
- * @fileOverview Shopping cart indicator. Ext.Button based component 
- *  with extra badge for displaying total sum
- * 
- * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120628
- * @license GNU GPL v3.0
- *
- * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
- * @requires Ext.Button component 
- * @requires cart.css badge-total class
- * 
- * Usage:
-   
-   // Indicator config...
-    {
-        xtype: 'cartbtn',
-        align: 'right',
-        iconCls: 'download',
-        iconMask: true
-    }
- 
- *
- */
-
-Ext.define('Cs.component.cart.Indicator', {
-    extend: 'Ext.Button',
-    xtype: 'cartbtn',
-    id: 'cartBtn',
-    
-    /**
-     * Override for Ext.Button template property 
-     */
-    template: [
-        {
-            tag: 'span',
-            reference: 'badgeElement',
-            hidden: true
-        },
-        {
-            tag: 'span',
-            className: 'badge-total',
-            reference: 'totalElement',
-            hidden: true
-        },
-        {
-            tag: 'span',
-            className: Ext.baseCSSPrefix + 'button-icon',
-            reference: 'iconElement',
-            hidden: true
-        },
-        {
-            tag: 'span',
-            reference: 'textElement',
-            hidden: true
-        }
-    ],
-
-    config: {
-        
-        /**
-         * @cfg {String} text 
-         * Text label on button
-         */
-        text: 'Cart',
-        
-        /**
-         * @cfg {String} ui 
-         * Button ui
-         */
-        ui: 'round',
-        
-        /**
-         * @cfg {String} totalBadgeText
-         * Text for tatalBadge
-         * @private
-         */
-        totalBadgeText: null,
-
-        /**
-         * @cfg {String} iconCls
-         * Icon style class
-         */
-        iconCls: 'cart',        
-        iconMask: true
-    },
-    
-    /**
-     * @private
-     */
-    updateTotalBadgeText: function(newText) {
-        if (newText && newText !== 0) {
-            this.totalElement.show();
-            this.totalElement.setText(newText);
-        } else {
-            this.totalElement.hide();
-            this.totalElement.setText('');
         }
     }
 });
@@ -43769,7 +44519,7 @@ Ext.define('Ext.dataview.IndexBar', {
 
         /**
          * @cfg {String} listPrefix
-         * The prefix string to be appended at the beginning of the list.
+         * The prefix string to be used at the beginning of the list.
          * E.g: useful to add a "#" prefix before numbers.
          * @accessor
          */
@@ -43972,6 +44722,18 @@ Ext.define('Ext.tab.Tab', {
         }
     ],
 
+    updateIconCls : function(newCls, oldCls) {
+        this.callParent([newCls, oldCls]);
+
+        if (oldCls) {
+            this.removeCls('x-tab-icon');
+        }
+
+        if (newCls) {
+            this.addCls('x-tab-icon');
+        }
+    },
+
     /**
      * @event activate
      * Fires when a tab is activated
@@ -44016,832 +44778,6 @@ Ext.define('Ext.tab.Tab', {
             this.setActive(false);
         }
     });
-});
-
-/**
- * @private
- */
-Ext.define('Ext.dataview.element.Container', {
-    extend: 'Ext.Component',
-
-    /**
-     * @event itemtouchstart
-     * Fires whenever an item is touched
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item touched
-     * @param {Number} index The index of the item touched
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event itemtouchmove
-     * Fires whenever an item is moved
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item moved
-     * @param {Number} index The index of the item moved
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event itemtouchend
-     * Fires whenever an item is touched
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item touched
-     * @param {Number} index The index of the item touched
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event itemtap
-     * Fires whenever an item is tapped
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item tapped
-     * @param {Number} index The index of the item tapped
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event itemtaphold
-     * Fires whenever an item is tapped
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item tapped
-     * @param {Number} index The index of the item tapped
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event itemsingletap
-     * Fires whenever an item is doubletapped
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item singletapped
-     * @param {Number} index The index of the item singletapped
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event itemdoubletap
-     * Fires whenever an item is doubletapped
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item doubletapped
-     * @param {Number} index The index of the item doubletapped
-     * @param {Ext.EventObject} e The event object
-     */
-
-    /**
-     * @event itemswipe
-     * Fires whenever an item is swiped
-     * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item swiped
-     * @param {Number} index The index of the item swiped
-     * @param {Ext.EventObject} e The event object
-     */
-
-    doInitialize: function() {
-        this.element.on({
-            touchstart: 'onItemTouchStart',
-            touchend: 'onItemTouchEnd',
-            tap: 'onItemTap',
-            taphold: 'onItemTapHold',
-            touchmove: 'onItemTouchMove',
-            singletap: 'onItemSingleTap',
-            doubletap: 'onItemDoubleTap',
-            swipe: 'onItemSwipe',
-            delegate: '> div',
-            scope: this
-        });
-    },
-
-    //@private
-    initialize: function() {
-        this.callParent();
-        this.doInitialize();
-    },
-
-    updateBaseCls: function(newBaseCls, oldBaseCls) {
-        var me = this;
-
-        me.callParent([newBaseCls + '-container', oldBaseCls]);
-    },
-
-    onItemTouchStart: function(e) {
-        var me = this,
-            target = e.getTarget(),
-            index = me.getViewItems().indexOf(target);
-
-        Ext.get(target).on({
-            touchmove: 'onItemTouchMove',
-            scope   : me,
-            single: true
-        });
-
-        me.fireEvent('itemtouchstart', me, Ext.get(target), index, e);
-    },
-
-    onItemTouchEnd: function(e) {
-        var me = this,
-            target = e.getTarget(),
-            index = me.getViewItems().indexOf(target);
-
-        Ext.get(target).un({
-            touchmove: 'onItemTouchMove',
-            scope   : me
-        });
-
-        me.fireEvent('itemtouchend', me, Ext.get(target), index, e);
-    },
-
-    onItemTouchMove: function(e) {
-        var me = this,
-            target = e.getTarget(),
-            index = me.getViewItems().indexOf(target);
-
-        me.fireEvent('itemtouchmove', me, Ext.get(target), index, e);
-    },
-
-    onItemTap: function(e) {
-        var me = this,
-            target = e.getTarget(),
-            index = me.getViewItems().indexOf(target);
-
-        me.fireEvent('itemtap', me, Ext.get(target), index, e);
-    },
-
-    onItemTapHold: function(e) {
-        var me     = this,
-            target = e.getTarget(),
-            index  = me.getViewItems().indexOf(target);
-
-        me.fireEvent('itemtaphold', me, Ext.get(target), index, e);
-    },
-
-    onItemDoubleTap: function(e) {
-        var me = this,
-            target = e.getTarget(),
-            index = me.getViewItems().indexOf(target);
-
-        me.fireEvent('itemdoubletap', me, Ext.get(target), index, e);
-    },
-
-    onItemSingleTap: function(e) {
-        var me = this,
-            target = e.getTarget(),
-            index = me.getViewItems().indexOf(target);
-
-        me.fireEvent('itemsingletap', me, Ext.get(target), index, e);
-    },
-
-    onItemSwipe: function(e) {
-        var me = this,
-            target = e.getTarget(),
-            index = me.getViewItems().indexOf(target);
-
-        me.fireEvent('itemswipe', me,  Ext.get(target), index, e);
-    },
-
-    updateListItem: function(record, item) {
-        var me = this,
-            dataview = me.dataview,
-            data = dataview.prepareData(record.getData(true), dataview.getStore().indexOf(record), record);
-        item.innerHTML = me.dataview.getItemTpl().apply(data);
-    },
-
-    addListItem: function(index, record) {
-        var me = this,
-            dataview = me.dataview,
-            data = dataview.prepareData(record.getData(true), dataview.getStore().indexOf(record), record),
-            element = me.element,
-            childNodes = element.dom.childNodes,
-            ln = childNodes.length,
-            wrapElement;
-
-        wrapElement = Ext.Element.create(this.getItemElementConfig(index, data));
-
-        if (!ln || index == ln) {
-            wrapElement.appendTo(element);
-        } else {
-            wrapElement.insertBefore(childNodes[index]);
-        }
-    },
-
-    getItemElementConfig: function(index, data) {
-        var dataview = this.dataview,
-            itemCls = dataview.getItemCls(),
-            cls = dataview.getBaseCls() + '-item';
-
-        if (itemCls) {
-            cls += ' ' + itemCls;
-        }
-        return {
-            cls: cls,
-            html: dataview.getItemTpl().apply(data)
-        };
-    },
-
-    doRemoveItemCls: function(cls) {
-        var elements = this.getViewItems(),
-            ln = elements.length,
-            i = 0;
-
-        for (; i < ln; i++) {
-            Ext.fly(elements[i]).removeCls(cls);
-        }
-    },
-
-    doAddItemCls: function(cls) {
-        var elements = this.getViewItems(),
-            ln = elements.length,
-            i = 0;
-
-        for (; i < ln; i++) {
-            Ext.fly(elements[i]).addCls(cls);
-        }
-    },
-
-    // Remove
-    moveItemsToCache: function(from, to) {
-        var me = this,
-            items = me.getViewItems(),
-            i = to - from,
-            item;
-
-        for (; i >= 0; i--) {
-            item = items[from + i];
-            item.parentNode.removeChild(item);
-        }
-        if (me.getViewItems().length == 0) {
-            this.dataview.showEmptyText();
-        }
-    },
-
-    // Add
-    moveItemsFromCache: function(records) {
-        var me = this,
-            dataview = me.dataview,
-            store = dataview.getStore(),
-            ln = records.length,
-            i, record;
-
-        if (ln) {
-            dataview.hideEmptyText();
-        }
-
-        for (i = 0; i < ln; i++) {
-            records[i]._tmpIndex = store.indexOf(records[i]);
-        }
-
-        Ext.Array.sort(records, function(record1, record2) {
-            return record1._tmpIndex > record2._tmpIndex ? 1 : -1;
-        });
-
-        for (i = 0; i < ln; i++) {
-            record = records[i];
-            me.addListItem(record._tmpIndex, record);
-            delete record._tmpIndex;
-        }
-    },
-
-    // Transform ChildNodes into a proper Array so we can do indexOf...
-    getViewItems: function() {
-        return Array.prototype.slice.call(this.element.dom.childNodes);
-    },
-
-    destroy: function() {
-        var elements = this.getViewItems(),
-            ln = elements.length,
-            i = 0;
-
-        for (; i < ln; i++) {
-            Ext.removeNode(elements[i]);
-        }
-        this.callParent();
-    }
-});
-
-/**
- * Tracks what records are currently selected in a databound widget. This class is mixed in to {@link Ext.dataview.DataView} and
- * all subclasses.
- * @private
- */
-Ext.define('Ext.mixin.Selectable', {
-    extend: 'Ext.mixin.Mixin',
-
-    mixinConfig: {
-        id: 'selectable',
-        hooks: {
-            updateStore: 'updateStore'
-        }
-    },
-
-    /**
-     * @event beforeselectionchange
-     * Fires before an item is selected
-     * @param {Ext.mixin.Selectable} this
-     * @preventable selectionchange
-     * @deprecated 2.0.0 Please listen to the {@link #selectionchange} event with an order of `before` instead.
-     */
-
-    /**
-     * @event selectionchange
-     * Fires when a selection changes
-     * @param {Ext.mixin.Selectable} this
-     * @param {Ext.data.Model[]} records The records whose selection has changed
-     */
-
-    config: {
-        /**
-         * @cfg {Boolean} disableSelection <p><tt>true</tt> to disable selection.
-         * This configuration will lock the selection model that the DataView uses.</p>
-         * @accessor
-         */
-        disableSelection: null,
-
-        /**
-         * @cfg {String} mode
-         * Modes of selection.
-         * Valid values are SINGLE, SIMPLE, and MULTI. Defaults to 'SINGLE'
-         * @accessor
-         */
-        mode: 'SINGLE',
-
-        /**
-         * @cfg {Boolean} allowDeselect
-         * Allow users to deselect a record in a DataView, List or Grid. Only applicable when the Selectable's mode is
-         * 'SINGLE'. Defaults to false.
-         * @accessor
-         */
-        allowDeselect: false,
-
-        /**
-         * @cfg {Ext.data.Model} lastSelected
-         * @private
-         * @accessor
-         */
-        lastSelected: null,
-
-        /**
-         * @cfg {Ext.data.Model} lastFocused
-         * @private
-         * @accessor
-         */
-        lastFocused: null,
-
-        /**
-         * @cfg {Boolean} deselectOnContainerClick True to deselect current selection when the container body is
-         * clicked. Defaults to true
-         * @accessor
-         */
-        deselectOnContainerClick: true
-    },
-
-    modes: {
-        SINGLE: true,
-        SIMPLE: true,
-        MULTI: true
-    },
-
-    selectableEventHooks: {
-        addrecords: 'onSelectionStoreAdd',
-        removerecords: 'onSelectionStoreRemove',
-        updaterecord: 'onSelectionStoreUpdate',
-        load: 'refreshSelection',
-        refresh: 'refreshSelection'
-    },
-
-    constructor: function() {
-        this.selected = new Ext.util.MixedCollection();
-        this.callParent(arguments);
-    },
-
-    /**
-     * @private
-     */
-    applyMode: function(mode) {
-        mode = mode ? mode.toUpperCase() : 'SINGLE';
-        // set to mode specified unless it doesnt exist, in that case
-        // use single.
-        return this.modes[mode] ? mode : 'SINGLE';
-    },
-
-    /**
-     * @private
-     */
-    updateStore: function(newStore, oldStore) {
-        var me = this,
-            bindEvents = Ext.apply({}, me.selectableEventHooks, { scope: me });
-
-        if (oldStore && Ext.isObject(oldStore) && oldStore.isStore) {
-            if (oldStore.autoDestroy) {
-                oldStore.destroy();
-            }
-            else {
-                oldStore.un(bindEvents);
-            }
-        }
-
-        if (newStore) {
-            newStore.on(bindEvents);
-            me.refreshSelection();
-        }
-    },
-
-    /**
-     * Selects all records.
-     * @param {Boolean} silent True to suppress all select events.
-     */
-    selectAll: function(silent) {
-        var me = this,
-            selections = me.getStore().getRange(),
-            ln = selections.length,
-            i = 0;
-        for (; i < ln; i++) {
-            me.select(selections[i], true, silent);
-        }
-    },
-
-    /**
-     * Deselects all records.
-     */
-    deselectAll: function(supress) {
-        var me = this,
-            selections = me.getStore().getRange();
-
-        me.deselect(selections, supress);
-
-        me.selected.clear();
-        me.setLastSelected(null);
-        me.setLastFocused(null);
-    },
-
-    // Provides differentiation of logic between MULTI, SIMPLE and SINGLE
-    // selection modes.
-    selectWithEvent: function(record) {
-        var me = this,
-            isSelected = me.isSelected(record);
-        switch (me.getMode()) {
-            case 'MULTI':
-            case 'SIMPLE':
-                if (isSelected) {
-                    me.deselect(record);
-                }
-                else {
-                    me.select(record, true);
-                }
-                break;
-            case 'SINGLE':
-                if (me.getAllowDeselect() && isSelected) {
-                    // if allowDeselect is on and this record isSelected, deselect it
-                    me.deselect(record);
-                } else {
-                    // select the record and do NOT maintain existing selections
-                    me.select(record, false);
-                }
-                break;
-        }
-    },
-
-    /**
-     * Selects a range of rows if the selection model {@link Ext.mixin.Selectable#getDisableSelection is not locked}.
-     * All rows in between startRow and endRow are also selected.
-     * @param {Number} startRow The index of the first row in the range
-     * @param {Number} endRow The index of the last row in the range
-     * @param {Boolean} keepExisting (optional) True to retain existing selections
-     */
-    selectRange: function(startRecord, endRecord, keepExisting) {
-        var me = this,
-            store = me.getStore(),
-            records = [],
-            tmp, i;
-
-        if (me.getDisableSelection()) {
-            return;
-        }
-
-        // swap values
-        if (startRecord > endRecord) {
-            tmp = endRecord;
-            endRecord = startRecord;
-            startRecord = tmp;
-        }
-
-        for (i = startRecord; i <= endRecord; i++) {
-            records.push(store.getAt(i));
-        }
-        this.doMultiSelect(records, keepExisting);
-    },
-
-    /**
-     * Adds the given records to the currently selected set
-     * @param {Ext.data.Model/Array/Number} records The records to select
-     * @param {Boolean} keepExisting If true, the existing selection will be added to (if not, the old selection is replaced)
-     * @param {Boolean} suppressEvent If true, the 'select' event will not be fired
-     */
-    select: function(records, keepExisting, suppressEvent) {
-        var me = this,
-            record;
-
-        if (me.getDisableSelection()) {
-            return;
-        }
-
-        if (typeof records === "number") {
-            records = [me.getStore().getAt(records)];
-        }
-
-        if (!records) {
-            return;
-        }
-
-        if (me.getMode() == "SINGLE" && records) {
-            record = records.length ? records[0] : records;
-            me.doSingleSelect(record, suppressEvent);
-        } else {
-            me.doMultiSelect(records, keepExisting, suppressEvent);
-        }
-    },
-
-    /**
-     * Selects a single record
-     * @private
-     */
-    doSingleSelect: function(record, suppressEvent) {
-        var me = this,
-            selected = me.selected;
-
-        if (me.getDisableSelection()) {
-            return;
-        }
-
-        // already selected.
-        // should we also check beforeselect?
-        if (me.isSelected(record)) {
-            return;
-        }
-
-        if (selected.getCount() > 0) {
-            me.deselect(me.getLastSelected(), suppressEvent);
-        }
-
-        selected.add(record);
-        me.setLastSelected(record);
-        me.onItemSelect(record, suppressEvent);
-        me.setLastFocused(record);
-
-        if (!suppressEvent) {
-            me.fireSelectionChange([record]);
-        }
-    },
-
-    /**
-     * Selects a set of multiple records
-     * @private
-     */
-    doMultiSelect: function(records, keepExisting, suppressEvent) {
-        if (records === null || this.getDisableSelection()) {
-            return;
-        }
-        records = !Ext.isArray(records) ? [records] : records;
-
-        var me = this,
-            selected = me.selected,
-            ln = records.length,
-            change = false,
-            i = 0,
-            record;
-
-        if (!keepExisting && selected.getCount() > 0) {
-            change = true;
-            me.deselect(me.getSelection(), true);
-        }
-        for (; i < ln; i++) {
-            record = records[i];
-            if (keepExisting && me.isSelected(record)) {
-                continue;
-            }
-            change = true;
-            me.setLastSelected(record);
-            selected.add(record);
-            if (!suppressEvent) {
-                me.setLastFocused(record);
-            }
-
-            me.onItemSelect(record, suppressEvent);
-        }
-        if (change && !suppressEvent) {
-            this.fireSelectionChange(records);
-        }
-    },
-
-    /**
-     * Deselects the given record(s). If many records are currently selected, it will only deselect those you pass in.
-     * @param {Number/Array/Ext.data.Model} records The record(s) to deselect. Can also be a number to reference by index
-     * @param {Boolean} suppressEvent If true the deselect event will not be fired
-     */
-    deselect: function(records, suppressEvent) {
-        var me = this;
-
-        if (me.getDisableSelection()) {
-            return;
-        }
-
-        records = Ext.isArray(records) ? records : [records];
-
-        var selected = me.selected,
-            change   = false,
-            i        = 0,
-            store    = me.getStore(),
-            ln       = records.length,
-            record;
-
-        for (; i < ln; i++) {
-            record = records[i];
-
-            if (typeof record === 'number') {
-                record = store.getAt(record);
-            }
-
-            if (selected.remove(record)) {
-                if (me.getLastSelected() == record) {
-                    me.setLastSelected(selected.last());
-                }
-                change = true;
-            }
-            if (record) {
-                me.onItemDeselect(record, suppressEvent);
-            }
-        }
-
-        if (change && !suppressEvent) {
-            me.fireSelectionChange(records);
-        }
-    },
-
-    /**
-     * Sets a record as the last focused record. This does NOT mean
-     * that the record has been selected.
-     * @param {Ext.data.Record} newRecord
-     * @param {Ext.data.Record} oldRecord
-     */
-    updateLastFocused: function(newRecord, oldRecord) {
-        this.onLastFocusChanged(oldRecord, newRecord);
-    },
-
-    fireSelectionChange: function(records) {
-        var me = this;
-            me.fireAction('selectionchange', [me, records], 'getSelection');
-    },
-
-    /**
-     * Returns an array of the currently selected records.
-     * @return {Array} An array of selected records
-     */
-    getSelection: function() {
-        return this.selected.getRange();
-    },
-
-    /**
-     * Returns <tt>true</tt> if the specified row is selected.
-     * @param {Ext.data.Model/Number} record The record or index of the record to check
-     * @return {Boolean}
-     */
-    isSelected: function(record) {
-        record = Ext.isNumber(record) ? this.getStore().getAt(record) : record;
-        return this.selected.indexOf(record) !== -1;
-    },
-
-    /**
-     * Returns true if there is a selected record.
-     * @return {Boolean}
-     */
-    hasSelection: function() {
-        return this.selected.getCount() > 0;
-    },
-
-    /**
-     * @private
-     */
-    refreshSelection: function() {
-        var me = this,
-            selections = me.getSelection();
-
-        me.deselectAll(true);
-        if (selections.length) {
-            me.select(selections, false, true);
-        }
-    },
-
-    // prune records from the SelectionModel if
-    // they were selected at the time they were
-    // removed.
-    onSelectionStoreRemove: function(store, records) {
-        var me = this,
-            selected = me.selected,
-            ln = records.length,
-            record, i;
-
-        if (me.getDisableSelection()) {
-            return;
-        }
-
-        for (i = 0; i < ln; i++) {
-            record = records[i];
-            if (selected.remove(record)) {
-                if (me.getLastSelected() == record) {
-                    me.setLastSelected(null);
-                }
-                if (me.getLastFocused() == record) {
-                    me.setLastFocused(null);
-                }
-                me.fireSelectionChange([record]);
-            }
-        }
-    },
-
-    /**
-     * Returns the number of selections.
-     * @return {Number}
-     */
-    getSelectionCount: function() {
-        return this.selected.getCount();
-    },
-
-    onSelectionStoreAdd: Ext.emptyFn,
-    onSelectionStoreUpdate: Ext.emptyFn,
-    onItemSelect: Ext.emptyFn,
-    onItemDeselect: Ext.emptyFn,
-    onLastFocusChanged: Ext.emptyFn,
-    onEditorKey: Ext.emptyFn
-}, function() {
-    /**
-     * Selects a record instance by record instance or index.
-     * @member Ext.mixin.Selectable
-     * @method doSelect
-     * @param {Ext.data.Model/Number} records An array of records or an index
-     * @param {Boolean} keepExisting
-     * @param {Boolean} suppressEvent Set to false to not fire a select event
-     * @deprecated 2.0.0 Please use {@link #select} instead.
-     */
-
-    /**
-     * Deselects a record instance by record instance or index.
-     * @member Ext.mixin.Selectable
-     * @method doDeselect
-     * @param {Ext.data.Model/Number} records An array of records or an index
-     * @param {Boolean} suppressEvent Set to false to not fire a deselect event
-     * @deprecated 2.0.0 Please use {@link #deselect} instead.
-     */
-
-    /**
-     * Returns the selection mode currently used by this Selectable
-     * @member Ext.mixin.Selectable
-     * @method getSelectionMode
-     * @return {String} The current mode
-     * @deprecated 2.0.0 Please use {@link #getMode} instead.
-     */
-
-    /**
-     * Returns the array of previously selected items
-     * @member Ext.mixin.Selectable
-     * @method getLastSelected
-     * @return {Array} The previous selection
-     * @deprecated 2.0.0
-     */
-
-    /**
-     * Returns true if the Selectable is currently locked
-     * @member Ext.mixin.Selectable
-     * @method isLocked
-     * @return {Boolean} True if currently locked
-     * @deprecated 2.0.0 Please use {@link #getDisableSelection} instead.
-     */
-
-    /**
-     * This was an internal function accidentally exposed in 1.x and now deprecated. Calling it has no effect
-     * @member Ext.mixin.Selectable
-     * @method setLastFocused
-     * @deprecated 2.0.0
-     */
-
-    /**
-     * Deselects any currently selected records and clears all stored selections
-     * @member Ext.mixin.Selectable
-     * @method clearSelections
-     * @deprecated 2.0.0 Please use {@link #deselectAll} instead.
-     */
-
-    /**
-     * Returns the number of selections.
-     * @member Ext.mixin.Selectable
-     * @method getCount
-     * @return {Number}
-     * @deprecated 2.0.0 Please use {@link #getSelectionCount} instead.
-     */
-
-    /**
-     * @cfg {Boolean} locked
-     * @inheritdoc Ext.mixin.Selectable#disableSelection
-     * @deprecated 2.0.0 Please use {@link #disableSelection} instead.
-     */
-
 });
 
 /**
@@ -45904,6 +45840,839 @@ Ext.define('Ext.data.NodeInterface', {
 });
 
 /**
+ * @private
+ */
+Ext.define('Ext.dataview.element.Container', {
+    extend: 'Ext.Component',
+
+    /**
+     * @event itemtouchstart
+     * Fires whenever an item is touched
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item touched
+     * @param {Number} index The index of the item touched
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event itemtouchmove
+     * Fires whenever an item is moved
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item moved
+     * @param {Number} index The index of the item moved
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event itemtouchend
+     * Fires whenever an item is touched
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item touched
+     * @param {Number} index The index of the item touched
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event itemtap
+     * Fires whenever an item is tapped
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item tapped
+     * @param {Number} index The index of the item tapped
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event itemtaphold
+     * Fires whenever an item is tapped
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item tapped
+     * @param {Number} index The index of the item tapped
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event itemsingletap
+     * Fires whenever an item is doubletapped
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item singletapped
+     * @param {Number} index The index of the item singletapped
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event itemdoubletap
+     * Fires whenever an item is doubletapped
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item doubletapped
+     * @param {Number} index The index of the item doubletapped
+     * @param {Ext.EventObject} e The event object
+     */
+
+    /**
+     * @event itemswipe
+     * Fires whenever an item is swiped
+     * @param {Ext.dataview.element.Container} this
+     * @param {Ext.dom.Element} item The item swiped
+     * @param {Number} index The index of the item swiped
+     * @param {Ext.EventObject} e The event object
+     */
+
+    doInitialize: function() {
+        this.element.on({
+            touchstart: 'onItemTouchStart',
+            touchend: 'onItemTouchEnd',
+            tap: 'onItemTap',
+            taphold: 'onItemTapHold',
+            touchmove: 'onItemTouchMove',
+            singletap: 'onItemSingleTap',
+            doubletap: 'onItemDoubleTap',
+            swipe: 'onItemSwipe',
+            delegate: '> div',
+            scope: this
+        });
+    },
+
+    //@private
+    initialize: function() {
+        this.callParent();
+        this.doInitialize();
+    },
+
+    updateBaseCls: function(newBaseCls, oldBaseCls) {
+        var me = this;
+
+        me.callParent([newBaseCls + '-container', oldBaseCls]);
+    },
+
+    onItemTouchStart: function(e) {
+        var me = this,
+            target = e.getTarget(),
+            index = me.getViewItems().indexOf(target);
+
+        Ext.get(target).on({
+            touchmove: 'onItemTouchMove',
+            scope   : me,
+            single: true
+        });
+
+        me.fireEvent('itemtouchstart', me, Ext.get(target), index, e);
+    },
+
+    onItemTouchEnd: function(e) {
+        var me = this,
+            target = e.getTarget(),
+            index = me.getViewItems().indexOf(target);
+
+        Ext.get(target).un({
+            touchmove: 'onItemTouchMove',
+            scope   : me
+        });
+
+        me.fireEvent('itemtouchend', me, Ext.get(target), index, e);
+    },
+
+    onItemTouchMove: function(e) {
+        var me = this,
+            target = e.getTarget(),
+            index = me.getViewItems().indexOf(target);
+
+        me.fireEvent('itemtouchmove', me, Ext.get(target), index, e);
+    },
+
+    onItemTap: function(e) {
+        var me = this,
+            target = e.getTarget(),
+            index = me.getViewItems().indexOf(target);
+
+        me.fireEvent('itemtap', me, Ext.get(target), index, e);
+    },
+
+    onItemTapHold: function(e) {
+        var me     = this,
+            target = e.getTarget(),
+            index  = me.getViewItems().indexOf(target);
+
+        me.fireEvent('itemtaphold', me, Ext.get(target), index, e);
+    },
+
+    onItemDoubleTap: function(e) {
+        var me = this,
+            target = e.getTarget(),
+            index = me.getViewItems().indexOf(target);
+
+        me.fireEvent('itemdoubletap', me, Ext.get(target), index, e);
+    },
+
+    onItemSingleTap: function(e) {
+        var me = this,
+            target = e.getTarget(),
+            index = me.getViewItems().indexOf(target);
+
+        me.fireEvent('itemsingletap', me, Ext.get(target), index, e);
+    },
+
+    onItemSwipe: function(e) {
+        var me = this,
+            target = e.getTarget(),
+            index = me.getViewItems().indexOf(target);
+
+        me.fireEvent('itemswipe', me,  Ext.get(target), index, e);
+    },
+
+    updateListItem: function(record, item) {
+        var me = this,
+            dataview = me.dataview,
+            data = dataview.prepareData(record.getData(true), dataview.getStore().indexOf(record), record);
+        item.innerHTML = me.dataview.getItemTpl().apply(data);
+    },
+
+    addListItem: function(index, record) {
+        var me = this,
+            dataview = me.dataview,
+            data = dataview.prepareData(record.getData(true), dataview.getStore().indexOf(record), record),
+            element = me.element,
+            childNodes = element.dom.childNodes,
+            ln = childNodes.length,
+            wrapElement;
+
+        wrapElement = Ext.Element.create(this.getItemElementConfig(index, data));
+
+        if (!ln || index == ln) {
+            wrapElement.appendTo(element);
+        } else {
+            wrapElement.insertBefore(childNodes[index]);
+        }
+    },
+
+    getItemElementConfig: function(index, data) {
+        var dataview = this.dataview,
+            itemCls = dataview.getItemCls(),
+            cls = dataview.getBaseCls() + '-item';
+
+        if (itemCls) {
+            cls += ' ' + itemCls;
+        }
+        return {
+            cls: cls,
+            html: dataview.getItemTpl().apply(data)
+        };
+    },
+
+    doRemoveItemCls: function(cls) {
+        var elements = this.getViewItems(),
+            ln = elements.length,
+            i = 0;
+
+        for (; i < ln; i++) {
+            Ext.fly(elements[i]).removeCls(cls);
+        }
+    },
+
+    doAddItemCls: function(cls) {
+        var elements = this.getViewItems(),
+            ln = elements.length,
+            i = 0;
+
+        for (; i < ln; i++) {
+            Ext.fly(elements[i]).addCls(cls);
+        }
+    },
+
+    // Remove
+    moveItemsToCache: function(from, to) {
+        var me = this,
+            items = me.getViewItems(),
+            i = to - from,
+            item;
+
+        for (; i >= 0; i--) {
+            item = items[from + i];
+            Ext.get(item).destroy();
+        }
+        if (me.getViewItems().length == 0) {
+            this.dataview.showEmptyText();
+        }
+    },
+
+    // Add
+    moveItemsFromCache: function(records) {
+        var me = this,
+            dataview = me.dataview,
+            store = dataview.getStore(),
+            ln = records.length,
+            i, record;
+
+        if (ln) {
+            dataview.hideEmptyText();
+        }
+
+        for (i = 0; i < ln; i++) {
+            records[i]._tmpIndex = store.indexOf(records[i]);
+        }
+
+        Ext.Array.sort(records, function(record1, record2) {
+            return record1._tmpIndex > record2._tmpIndex ? 1 : -1;
+        });
+
+        for (i = 0; i < ln; i++) {
+            record = records[i];
+            me.addListItem(record._tmpIndex, record);
+            delete record._tmpIndex;
+        }
+    },
+
+    // Transform ChildNodes into a proper Array so we can do indexOf...
+    getViewItems: function() {
+        return Array.prototype.slice.call(this.element.dom.childNodes);
+    },
+
+    destroy: function() {
+        var elements = this.getViewItems(),
+            ln = elements.length,
+            i = 0;
+
+        for (; i < ln; i++) {
+            Ext.get(elements[i]).destroy();
+        }
+        this.callParent();
+    }
+});
+
+/**
+ * Tracks what records are currently selected in a databound widget. This class is mixed in to {@link Ext.dataview.DataView} and
+ * all subclasses.
+ * @private
+ */
+Ext.define('Ext.mixin.Selectable', {
+    extend: 'Ext.mixin.Mixin',
+
+    mixinConfig: {
+        id: 'selectable',
+        hooks: {
+            updateStore: 'updateStore'
+        }
+    },
+
+    /**
+     * @event beforeselectionchange
+     * Fires before an item is selected
+     * @param {Ext.mixin.Selectable} this
+     * @preventable selectionchange
+     * @deprecated 2.0.0 Please listen to the {@link #selectionchange} event with an order of `before` instead.
+     */
+
+    /**
+     * @event selectionchange
+     * Fires when a selection changes
+     * @param {Ext.mixin.Selectable} this
+     * @param {Ext.data.Model[]} records The records whose selection has changed
+     */
+
+    config: {
+        /**
+         * @cfg {Boolean} disableSelection <p><tt>true</tt> to disable selection.
+         * This configuration will lock the selection model that the DataView uses.</p>
+         * @accessor
+         */
+        disableSelection: null,
+
+        /**
+         * @cfg {String} mode
+         * Modes of selection.
+         * Valid values are SINGLE, SIMPLE, and MULTI. Defaults to 'SINGLE'
+         * @accessor
+         */
+        mode: 'SINGLE',
+
+        /**
+         * @cfg {Boolean} allowDeselect
+         * Allow users to deselect a record in a DataView, List or Grid. Only applicable when the Selectable's mode is
+         * 'SINGLE'. Defaults to false.
+         * @accessor
+         */
+        allowDeselect: false,
+
+        /**
+         * @cfg {Ext.data.Model} lastSelected
+         * @private
+         * @accessor
+         */
+        lastSelected: null,
+
+        /**
+         * @cfg {Ext.data.Model} lastFocused
+         * @private
+         * @accessor
+         */
+        lastFocused: null,
+
+        /**
+         * @cfg {Boolean} deselectOnContainerClick True to deselect current selection when the container body is
+         * clicked. Defaults to true
+         * @accessor
+         */
+        deselectOnContainerClick: true
+    },
+
+    modes: {
+        SINGLE: true,
+        SIMPLE: true,
+        MULTI: true
+    },
+
+    selectableEventHooks: {
+        addrecords: 'onSelectionStoreAdd',
+        removerecords: 'onSelectionStoreRemove',
+        updaterecord: 'onSelectionStoreUpdate',
+        load: 'refreshSelection',
+        refresh: 'refreshSelection'
+    },
+
+    constructor: function() {
+        this.selected = new Ext.util.MixedCollection();
+        this.callParent(arguments);
+    },
+
+    /**
+     * @private
+     */
+    applyMode: function(mode) {
+        mode = mode ? mode.toUpperCase() : 'SINGLE';
+        // set to mode specified unless it doesnt exist, in that case
+        // use single.
+        return this.modes[mode] ? mode : 'SINGLE';
+    },
+
+    /**
+     * @private
+     */
+    updateStore: function(newStore, oldStore) {
+        var me = this,
+            bindEvents = Ext.apply({}, me.selectableEventHooks, { scope: me });
+
+        if (oldStore && Ext.isObject(oldStore) && oldStore.isStore) {
+            if (oldStore.autoDestroy) {
+                oldStore.destroy();
+            }
+            else {
+                oldStore.un(bindEvents);
+                newStore.un('clear', 'onSelectionStoreClear', this);
+            }
+        }
+
+        if (newStore) {
+            newStore.on(bindEvents);
+            newStore.onBefore('clear', 'onSelectionStoreClear', this);
+            me.refreshSelection();
+        }
+    },
+
+    /**
+     * Selects all records.
+     * @param {Boolean} silent True to suppress all select events.
+     */
+    selectAll: function(silent) {
+        var me = this,
+            selections = me.getStore().getRange(),
+            ln = selections.length,
+            i = 0;
+        for (; i < ln; i++) {
+            me.select(selections[i], true, silent);
+        }
+    },
+
+    /**
+     * Deselects all records.
+     */
+    deselectAll: function(supress) {
+        var me = this,
+            selections = me.getStore().getRange();
+
+        me.deselect(selections, supress);
+
+        me.selected.clear();
+        me.setLastSelected(null);
+        me.setLastFocused(null);
+    },
+
+    // Provides differentiation of logic between MULTI, SIMPLE and SINGLE
+    // selection modes.
+    selectWithEvent: function(record) {
+        var me = this,
+            isSelected = me.isSelected(record);
+        switch (me.getMode()) {
+            case 'MULTI':
+            case 'SIMPLE':
+                if (isSelected) {
+                    me.deselect(record);
+                }
+                else {
+                    me.select(record, true);
+                }
+                break;
+            case 'SINGLE':
+                if (me.getAllowDeselect() && isSelected) {
+                    // if allowDeselect is on and this record isSelected, deselect it
+                    me.deselect(record);
+                } else {
+                    // select the record and do NOT maintain existing selections
+                    me.select(record, false);
+                }
+                break;
+        }
+    },
+
+    /**
+     * Selects a range of rows if the selection model {@link Ext.mixin.Selectable#getDisableSelection is not locked}.
+     * All rows in between startRow and endRow are also selected.
+     * @param {Number} startRow The index of the first row in the range
+     * @param {Number} endRow The index of the last row in the range
+     * @param {Boolean} keepExisting (optional) True to retain existing selections
+     */
+    selectRange: function(startRecord, endRecord, keepExisting) {
+        var me = this,
+            store = me.getStore(),
+            records = [],
+            tmp, i;
+
+        if (me.getDisableSelection()) {
+            return;
+        }
+
+        // swap values
+        if (startRecord > endRecord) {
+            tmp = endRecord;
+            endRecord = startRecord;
+            startRecord = tmp;
+        }
+
+        for (i = startRecord; i <= endRecord; i++) {
+            records.push(store.getAt(i));
+        }
+        this.doMultiSelect(records, keepExisting);
+    },
+
+    /**
+     * Adds the given records to the currently selected set
+     * @param {Ext.data.Model/Array/Number} records The records to select
+     * @param {Boolean} keepExisting If true, the existing selection will be added to (if not, the old selection is replaced)
+     * @param {Boolean} suppressEvent If true, the 'select' event will not be fired
+     */
+    select: function(records, keepExisting, suppressEvent) {
+        var me = this,
+            record;
+
+        if (me.getDisableSelection()) {
+            return;
+        }
+
+        if (typeof records === "number") {
+            records = [me.getStore().getAt(records)];
+        }
+
+        if (!records) {
+            return;
+        }
+
+        if (me.getMode() == "SINGLE" && records) {
+            record = records.length ? records[0] : records;
+            me.doSingleSelect(record, suppressEvent);
+        } else {
+            me.doMultiSelect(records, keepExisting, suppressEvent);
+        }
+    },
+
+    /**
+     * Selects a single record
+     * @private
+     */
+    doSingleSelect: function(record, suppressEvent) {
+        var me = this,
+            selected = me.selected;
+
+        if (me.getDisableSelection()) {
+            return;
+        }
+
+        // already selected.
+        // should we also check beforeselect?
+        if (me.isSelected(record)) {
+            return;
+        }
+
+        if (selected.getCount() > 0) {
+            me.deselect(me.getLastSelected(), suppressEvent);
+        }
+
+        selected.add(record);
+        me.setLastSelected(record);
+        me.onItemSelect(record, suppressEvent);
+        me.setLastFocused(record);
+
+        if (!suppressEvent) {
+            me.fireSelectionChange([record]);
+        }
+    },
+
+    /**
+     * Selects a set of multiple records
+     * @private
+     */
+    doMultiSelect: function(records, keepExisting, suppressEvent) {
+        if (records === null || this.getDisableSelection()) {
+            return;
+        }
+        records = !Ext.isArray(records) ? [records] : records;
+
+        var me = this,
+            selected = me.selected,
+            ln = records.length,
+            change = false,
+            i = 0,
+            record;
+
+        if (!keepExisting && selected.getCount() > 0) {
+            change = true;
+            me.deselect(me.getSelection(), true);
+        }
+        for (; i < ln; i++) {
+            record = records[i];
+            if (keepExisting && me.isSelected(record)) {
+                continue;
+            }
+            change = true;
+            me.setLastSelected(record);
+            selected.add(record);
+            if (!suppressEvent) {
+                me.setLastFocused(record);
+            }
+
+            me.onItemSelect(record, suppressEvent);
+        }
+        if (change && !suppressEvent) {
+            this.fireSelectionChange(records);
+        }
+    },
+
+    /**
+     * Deselects the given record(s). If many records are currently selected, it will only deselect those you pass in.
+     * @param {Number/Array/Ext.data.Model} records The record(s) to deselect. Can also be a number to reference by index
+     * @param {Boolean} suppressEvent If true the deselect event will not be fired
+     */
+    deselect: function(records, suppressEvent) {
+        var me = this;
+
+        if (me.getDisableSelection()) {
+            return;
+        }
+
+        records = Ext.isArray(records) ? records : [records];
+
+        var selected = me.selected,
+            change   = false,
+            i        = 0,
+            store    = me.getStore(),
+            ln       = records.length,
+            record;
+
+        for (; i < ln; i++) {
+            record = records[i];
+
+            if (typeof record === 'number') {
+                record = store.getAt(record);
+            }
+
+            if (selected.remove(record)) {
+                if (me.getLastSelected() == record) {
+                    me.setLastSelected(selected.last());
+                }
+                change = true;
+            }
+            if (record) {
+                me.onItemDeselect(record, suppressEvent);
+            }
+        }
+
+        if (change && !suppressEvent) {
+            me.fireSelectionChange(records);
+        }
+    },
+
+    /**
+     * Sets a record as the last focused record. This does NOT mean
+     * that the record has been selected.
+     * @param {Ext.data.Record} newRecord
+     * @param {Ext.data.Record} oldRecord
+     */
+    updateLastFocused: function(newRecord, oldRecord) {
+        this.onLastFocusChanged(oldRecord, newRecord);
+    },
+
+    fireSelectionChange: function(records) {
+        var me = this;
+            me.fireAction('selectionchange', [me, records], 'getSelection');
+    },
+
+    /**
+     * Returns an array of the currently selected records.
+     * @return {Array} An array of selected records
+     */
+    getSelection: function() {
+        return this.selected.getRange();
+    },
+
+    /**
+     * Returns <tt>true</tt> if the specified row is selected.
+     * @param {Ext.data.Model/Number} record The record or index of the record to check
+     * @return {Boolean}
+     */
+    isSelected: function(record) {
+        record = Ext.isNumber(record) ? this.getStore().getAt(record) : record;
+        return this.selected.indexOf(record) !== -1;
+    },
+
+    /**
+     * Returns true if there is a selected record.
+     * @return {Boolean}
+     */
+    hasSelection: function() {
+        return this.selected.getCount() > 0;
+    },
+
+    /**
+     * @private
+     */
+    refreshSelection: function() {
+        var me = this,
+            selections = me.getSelection();
+
+        me.deselectAll(true);
+        if (selections.length) {
+            me.select(selections, false, true);
+        }
+    },
+
+    // prune records from the SelectionModel if
+    // they were selected at the time they were
+    // removed.
+    onSelectionStoreRemove: function(store, records) {
+        var me = this,
+            selected = me.selected,
+            ln = records.length,
+            record, i;
+
+        if (me.getDisableSelection()) {
+            return;
+        }
+
+        for (i = 0; i < ln; i++) {
+            record = records[i];
+            if (selected.remove(record)) {
+                if (me.getLastSelected() == record) {
+                    me.setLastSelected(null);
+                }
+                if (me.getLastFocused() == record) {
+                    me.setLastFocused(null);
+                }
+                me.fireSelectionChange([record]);
+            }
+        }
+    },
+
+    onSelectionStoreClear: function(store) {
+        var records = store.getData().items;
+        this.onSelectionStoreRemove(store, records);
+    },
+
+    /**
+     * Returns the number of selections.
+     * @return {Number}
+     */
+    getSelectionCount: function() {
+        return this.selected.getCount();
+    },
+
+    onSelectionStoreAdd: Ext.emptyFn,
+    onSelectionStoreUpdate: Ext.emptyFn,
+    onItemSelect: Ext.emptyFn,
+    onItemDeselect: Ext.emptyFn,
+    onLastFocusChanged: Ext.emptyFn,
+    onEditorKey: Ext.emptyFn
+}, function() {
+    /**
+     * Selects a record instance by record instance or index.
+     * @member Ext.mixin.Selectable
+     * @method doSelect
+     * @param {Ext.data.Model/Number} records An array of records or an index
+     * @param {Boolean} keepExisting
+     * @param {Boolean} suppressEvent Set to false to not fire a select event
+     * @deprecated 2.0.0 Please use {@link #select} instead.
+     */
+
+    /**
+     * Deselects a record instance by record instance or index.
+     * @member Ext.mixin.Selectable
+     * @method doDeselect
+     * @param {Ext.data.Model/Number} records An array of records or an index
+     * @param {Boolean} suppressEvent Set to false to not fire a deselect event
+     * @deprecated 2.0.0 Please use {@link #deselect} instead.
+     */
+
+    /**
+     * Returns the selection mode currently used by this Selectable
+     * @member Ext.mixin.Selectable
+     * @method getSelectionMode
+     * @return {String} The current mode
+     * @deprecated 2.0.0 Please use {@link #getMode} instead.
+     */
+
+    /**
+     * Returns the array of previously selected items
+     * @member Ext.mixin.Selectable
+     * @method getLastSelected
+     * @return {Array} The previous selection
+     * @deprecated 2.0.0
+     */
+
+    /**
+     * Returns true if the Selectable is currently locked
+     * @member Ext.mixin.Selectable
+     * @method isLocked
+     * @return {Boolean} True if currently locked
+     * @deprecated 2.0.0 Please use {@link #getDisableSelection} instead.
+     */
+
+    /**
+     * This was an internal function accidentally exposed in 1.x and now deprecated. Calling it has no effect
+     * @member Ext.mixin.Selectable
+     * @method setLastFocused
+     * @deprecated 2.0.0
+     */
+
+    /**
+     * Deselects any currently selected records and clears all stored selections
+     * @member Ext.mixin.Selectable
+     * @method clearSelections
+     * @deprecated 2.0.0 Please use {@link #deselectAll} instead.
+     */
+
+    /**
+     * Returns the number of selections.
+     * @member Ext.mixin.Selectable
+     * @method getCount
+     * @return {Number}
+     * @deprecated 2.0.0 Please use {@link #getSelectionCount} instead.
+     */
+
+    /**
+     * @cfg {Boolean} locked
+     * @inheritdoc Ext.mixin.Selectable#disableSelection
+     * @deprecated 2.0.0 Please use {@link #disableSelection} instead.
+     */
+
+});
+
+/**
  * A DataItem is a container for {@link Ext.dataview.DataView} with useComponents: true. It ties together
  * {@link Ext.data.Model records} to its contained Components via a {@link #dataMap dataMap} configuration.
  *
@@ -46044,33 +46813,6 @@ Ext.define('Ext.dataview.component.DataItem', {
     }
 });
 
-Ext.define('Cart.model.Categories', {
-    extend: 'Ext.data.Model',
-
-    requires: [
-        'Cart.model.Item'
-    ],
-
-    config: {
-        fields: [
-            {name: 'id', type: 'integer'},
-            {name: 'text', type: 'string'},
-            {name: 'leaf', type: 'boolean'}
-        ],
-
-        idProperty: 'id',
-
-        associations: [
-            {
-                type: 'hasMany',
-                model: 'Cart.model.Item',
-                associationKey: 'products',
-                name: 'getProducts',
-                autoLoad: true
-            }
-        ]
-    }
-});
 /**
  * Ext.tab.Bar is used internally by {@link Ext.tab.Panel} to create the bar of tabs that appears at the top of the tab
  * panel. It's unusual to use it directly, instead see the {@link Ext.tab.Panel tab panel docs} for usage instructions.
@@ -46180,7 +46922,8 @@ Ext.define('Ext.tab.Bar', {
             newTab.setActive(true);
         }
 
-        if (oldTab) {
+        //Check if the parent is present, if not it is destroyed
+        if (oldTab && oldTab.parent) {
             oldTab.setActive(false);
         }
     },
@@ -46525,142 +47268,6 @@ Ext.define('Ext.tab.Panel', {
         this.callParent(arguments);
     }
 }, function() {
-});
-
-/**
- * @private
-*/
-Ext.define('Ext.dataview.element.List', {
-    extend: 'Ext.dataview.element.Container',
-
-    updateBaseCls: function(newBaseCls) {
-        var me = this;
-
-        me.itemClsShortCache = newBaseCls + '-item';
-
-        me.headerClsShortCache = newBaseCls + '-header';
-        me.headerClsCache = '.' + me.headerClsShortCache;
-
-        me.headerItemClsShortCache = newBaseCls + '-header-item';
-
-        me.footerClsShortCache = newBaseCls + '-footer-item';
-        me.footerClsCache = '.' + me.footerClsShortCache;
-
-        me.labelClsShortCache = newBaseCls + '-item-label';
-        me.labelClsCache = '.' + me.labelClsShortCache;
-
-        me.disclosureClsShortCache = newBaseCls + '-disclosure';
-        me.disclosureClsCache = '.' + me.disclosureClsShortCache;
-
-        me.iconClsShortCache = newBaseCls + '-icon';
-        me.iconClsCache = '.' + me.iconClsShortCache;
-
-        this.callParent(arguments);
-    },
-
-    hiddenDisplayCache: Ext.baseCSSPrefix + 'hidden-display',
-
-    getItemElementConfig: function(index, data) {
-        var me = this,
-            dataview = me.dataview,
-            itemCls = dataview.getItemCls(),
-            cls = me.itemClsShortCache,
-            config, iconSrc;
-
-        if (itemCls) {
-            cls += ' ' + itemCls;
-        }
-
-        config = {
-            cls: cls,
-            children: [{
-                cls: me.labelClsShortCache,
-                html: dataview.getItemTpl().apply(data)
-            }]
-        };
-
-        if (dataview.getIcon()) {
-            iconSrc = data.iconSrc;
-            config.children.push({
-                cls: me.iconClsShortCache,
-                style: 'background-image: ' + iconSrc ? 'url("' + newSrc + '")' : ''
-            });
-        }
-
-        if (dataview.getOnItemDisclosure()) {
-            config.children.push({
-                cls: me.disclosureClsShortCache + ' ' + ((data[dataview.getDisclosureProperty()] === false) ? me.hiddenDisplayCache : '')
-            });
-        }
-        return config;
-    },
-
-    updateListItem: function(record, item) {
-        var me = this,
-            dataview = me.dataview,
-            extItem = Ext.fly(item),
-            innerItem = extItem.down(me.labelClsCache, true),
-            data = dataview.prepareData(record.getData(true), dataview.getStore().indexOf(record), record),
-            disclosureProperty = dataview.getDisclosureProperty(),
-            hasDisclosureProperty = data && data.hasOwnProperty(disclosureProperty),
-            iconSrc = data && data.hasOwnProperty('iconSrc'),
-            disclosureEl, iconEl;
-
-        innerItem.innerHTML = dataview.getItemTpl().apply(data);
-
-        if (hasDisclosureProperty) {
-            disclosureEl = extItem.down(me.disclosureClsCache);
-            disclosureEl[data[disclosureProperty] === false ? 'removeCls' : 'addCls'](me.hiddenDisplayCache);
-        }
-
-        if (dataview.getIcon()) {
-            iconEl = extItem.down(me.iconClsCache, true);
-            iconEl.style.backgroundImage = iconSrc ? 'url("' + iconSrc + '")' : '';
-        }
-    },
-
-    doRemoveHeaders: function() {
-        var me = this,
-            headerClsShortCache = me.headerItemClsShortCache,
-            existingHeaders = me.element.query(me.headerClsCache),
-            existingHeadersLn = existingHeaders.length,
-            i = 0,
-            item;
-
-        for (; i < existingHeadersLn; i++) {
-            item = existingHeaders[i];
-            Ext.fly(item.parentNode).removeCls(headerClsShortCache);
-            Ext.removeNode(item);
-        }
-    },
-
-    doRemoveFooterCls: function() {
-        var me = this,
-            footerClsShortCache = me.footerClsShortCache,
-            existingFooters = me.element.query(me.footerClsCache),
-            existingFootersLn = existingFooters.length,
-            i = 0;
-
-        for (; i < existingFootersLn; i++) {
-            Ext.fly(existingFooters[i]).removeCls(footerClsShortCache);
-        }
-    },
-
-    doAddHeader: function(item, html) {
-        item = Ext.fly(item);
-        if (html) {
-            item.insertFirst(Ext.Element.create({
-                cls: this.headerClsShortCache,
-                html: html
-            }));
-        }
-        item.addCls(this.headerItemClsShortCache);
-    },
-
-    destroy: function() {
-        this.doRemoveHeaders();
-        this.callParent();
-    }
 });
 
 /**
@@ -47277,6 +47884,142 @@ Ext.define('Cart.store.Categories', {
         }
     }
 });
+/**
+ * @private
+*/
+Ext.define('Ext.dataview.element.List', {
+    extend: 'Ext.dataview.element.Container',
+
+    updateBaseCls: function(newBaseCls) {
+        var me = this;
+
+        me.itemClsShortCache = newBaseCls + '-item';
+
+        me.headerClsShortCache = newBaseCls + '-header';
+        me.headerClsCache = '.' + me.headerClsShortCache;
+
+        me.headerItemClsShortCache = newBaseCls + '-header-item';
+
+        me.footerClsShortCache = newBaseCls + '-footer-item';
+        me.footerClsCache = '.' + me.footerClsShortCache;
+
+        me.labelClsShortCache = newBaseCls + '-item-label';
+        me.labelClsCache = '.' + me.labelClsShortCache;
+
+        me.disclosureClsShortCache = newBaseCls + '-disclosure';
+        me.disclosureClsCache = '.' + me.disclosureClsShortCache;
+
+        me.iconClsShortCache = newBaseCls + '-icon';
+        me.iconClsCache = '.' + me.iconClsShortCache;
+
+        this.callParent(arguments);
+    },
+
+    hiddenDisplayCache: Ext.baseCSSPrefix + 'hidden-display',
+
+    getItemElementConfig: function(index, data) {
+        var me = this,
+            dataview = me.dataview,
+            itemCls = dataview.getItemCls(),
+            cls = me.itemClsShortCache,
+            config, iconSrc;
+
+        if (itemCls) {
+            cls += ' ' + itemCls;
+        }
+
+        config = {
+            cls: cls,
+            children: [{
+                cls: me.labelClsShortCache,
+                html: dataview.getItemTpl().apply(data)
+            }]
+        };
+
+        if (dataview.getIcon()) {
+            iconSrc = data.iconSrc;
+            config.children.push({
+                cls: me.iconClsShortCache,
+                style: 'background-image: ' + iconSrc ? 'url("' + newSrc + '")' : ''
+            });
+        }
+
+        if (dataview.getOnItemDisclosure()) {
+            config.children.push({
+                cls: me.disclosureClsShortCache + ' ' + ((data[dataview.getDisclosureProperty()] === false) ? me.hiddenDisplayCache : '')
+            });
+        }
+        return config;
+    },
+
+    updateListItem: function(record, item) {
+        var me = this,
+            dataview = me.dataview,
+            extItem = Ext.fly(item),
+            innerItem = extItem.down(me.labelClsCache, true),
+            data = dataview.prepareData(record.getData(true), dataview.getStore().indexOf(record), record),
+            disclosureProperty = dataview.getDisclosureProperty(),
+            hasDisclosureProperty = data && data.hasOwnProperty(disclosureProperty),
+            iconSrc = data && data.hasOwnProperty('iconSrc'),
+            disclosureEl, iconEl;
+
+        innerItem.innerHTML = dataview.getItemTpl().apply(data);
+
+        if (hasDisclosureProperty) {
+            disclosureEl = extItem.down(me.disclosureClsCache);
+            disclosureEl[data[disclosureProperty] === false ? 'addCls' : 'removeCls'](me.hiddenDisplayCache);
+        }
+
+        if (dataview.getIcon()) {
+            iconEl = extItem.down(me.iconClsCache, true);
+            iconEl.style.backgroundImage = iconSrc ? 'url("' + iconSrc + '")' : '';
+        }
+    },
+
+    doRemoveHeaders: function() {
+        var me = this,
+            headerClsShortCache = me.headerItemClsShortCache,
+            existingHeaders = me.element.query(me.headerClsCache),
+            existingHeadersLn = existingHeaders.length,
+            i = 0,
+            item;
+
+        for (; i < existingHeadersLn; i++) {
+            item = existingHeaders[i];
+            Ext.fly(item.parentNode).removeCls(headerClsShortCache);
+            Ext.get(item).destroy();
+        }
+    },
+
+    doRemoveFooterCls: function() {
+        var me = this,
+            footerClsShortCache = me.footerClsShortCache,
+            existingFooters = me.element.query(me.footerClsCache),
+            existingFootersLn = existingFooters.length,
+            i = 0;
+
+        for (; i < existingFootersLn; i++) {
+            Ext.fly(existingFooters[i]).removeCls(footerClsShortCache);
+        }
+    },
+
+    doAddHeader: function(item, html) {
+        item = Ext.fly(item);
+        if (html) {
+            item.insertFirst(Ext.Element.create({
+                cls: this.headerClsShortCache,
+                html: html
+            }));
+        }
+        item.addCls(this.headerItemClsShortCache);
+    },
+
+    destroy: function() {
+        this.doRemoveHeaders();
+        this.callParent();
+    }
+});
+
 /**
  * @private
  */
@@ -48009,6 +48752,8 @@ Ext.define('Ext.dataview.DataView', {
 
         me.mixins.selectable.constructor.apply(me, arguments);
 
+        me.indexOffset = 0;
+
         me.callParent(arguments);
     },
 
@@ -48119,7 +48864,7 @@ Ext.define('Ext.dataview.DataView', {
 
     doAddPressedCls: function(record) {
         var me = this,
-        item = me.container.getViewItems()[me.getStore().indexOf(record)];
+        item = me.getViewItems()[me.getStore().indexOf(record)];
         if (Ext.isElement(item)) {
             item = Ext.get(item);
         }
@@ -48235,7 +48980,7 @@ Ext.define('Ext.dataview.DataView', {
     // invoked by the selection model to maintain visual UI cues
     doItemSelect: function(me, record) {
         if (me.container && !me.isDestroyed) {
-            var item = me.container.getViewItems()[me.getStore().indexOf(record)];
+            var item = me.getItemAt(me.getStore().indexOf(record));
             if (Ext.isElement(item)) {
                 item = Ext.get(item);
             }
@@ -48260,7 +49005,7 @@ Ext.define('Ext.dataview.DataView', {
     },
 
     doItemDeselect: function(me, record) {
-        var item = me.container.getViewItems()[me.getStore().indexOf(record)];
+        var item = me.getItemAt(me.getStore().indexOf(record));
 
         if (Ext.isElement(item)) {
             item = Ext.get(item);
@@ -48318,7 +49063,8 @@ Ext.define('Ext.dataview.DataView', {
             proxy, reader;
 
         if (oldStore && Ext.isObject(oldStore) && oldStore.isStore) {
-            if (oldStore.autoDestroy) {
+            me.onStoreClear();
+            if (oldStore.getAutoDestroy()) {
                 oldStore.destroy();
             }
             else {
@@ -48436,6 +49182,29 @@ Ext.define('Ext.dataview.DataView', {
         me.updateStore(me.getStore());
     },
 
+    /*
+        Returns an item at the specified index
+        @param index Index of the item
+        @return {Ext.dom.Element/Ext.dataview.component.DataItem} item Item at the specified index
+     */
+    getItemAt: function(index) {
+        return this.getViewItems()[index - this.indexOffset];
+    },
+
+    /*
+        Returns an index for the specified item
+        @param index Index of the item
+        @return {Number} index Index for the specified item
+     */
+    getItemIndex: function(item) {
+        var index = this.getViewItems().indexOf(item);
+        return (index === -1) ? index : this.indexOffset + index;
+    },
+
+    /*
+        Returns an array of the current items in the DataView
+        @return {Ext.dom.Element[]/Ext.dataview.component.DataItem[]} items Array of Items
+     */
     getViewItems: function() {
         return this.container.getViewItems();
     },
@@ -48444,7 +49213,7 @@ Ext.define('Ext.dataview.DataView', {
         var container = me.container,
             store = me.getStore(),
             records = store.getRange(),
-            items = container.getViewItems(),
+            items = me.getViewItems(),
             recordsLn = records.length,
             itemsLn = items.length,
             deltaLn = recordsLn - itemsLn,
@@ -48465,7 +49234,7 @@ Ext.define('Ext.dataview.DataView', {
         if (deltaLn < 0) {
             container.moveItemsToCache(itemsLn + deltaLn, itemsLn - 1);
             // Items can changed, we need to refresh our references
-            items = container.getViewItems();
+            items = me.getViewItems();
             itemsLn = items.length;
         }
         // Not enough items, create new ones
@@ -48492,10 +49261,18 @@ Ext.define('Ext.dataview.DataView', {
         }
     },
 
+    destroy: function() {
+        var store = this.getStore();
+        if (store.getAutoDestroy()) {
+            store.destroy();
+        }
+        this.callParent(arguments);
+    },
+
     onStoreClear: function() {
         var me = this,
             container = me.container,
-            items = container.getViewItems();
+            items = me.getViewItems();
 
         container.moveItemsToCache(0, items.length - 1);
         this.showEmptyText();
@@ -48534,7 +49311,7 @@ Ext.define('Ext.dataview.DataView', {
         }
         else {
             // Bypassing setter because sometimes we pass the same record (different data)
-            container.updateListItem(record, container.getViewItems()[newIndex]);
+            container.updateListItem(record, me.getViewItems()[newIndex]);
         }
     }
 });
@@ -48910,11 +49687,11 @@ Ext.define('Ext.dataview.List', {
     },
 
     onStoreClear: function() {
-        this.callParent();
         if (this.header) {
             this.header.destroy();
         }
-        this.doRefreshHeaders();
+        this.container.doRemoveHeaders();
+        this.callParent();
     },
 
     // @private
@@ -48974,6 +49751,10 @@ Ext.define('Ext.dataview.List', {
                         offset: headerItem.offsetTop
                     });
                 }
+            }
+
+            if (!this.getPinHeaders()) {
+              return;
             }
 
             headerInfo.closest = this.getClosestGroups();
@@ -49279,7 +50060,7 @@ Ext.define('Ext.dataview.NestedList', {
     xtype : 'nestedlist',
     requires: [
         'Ext.List',
-        'Ext.Toolbar',
+        'Ext.TitleBar',
         'Ext.Button',
         'Ext.XTemplate',
         'Ext.data.StoreManager',
@@ -50003,7 +50784,6 @@ Ext.define("Cart.view.Main", {
         'Ext.TitleBar',
         'Ext.dataview.List',
         'Ext.data.Store',
-        'Cs.component.cart.Indicator',
         'Ext.dataview.NestedList'
     ],
 
@@ -50041,7 +50821,8 @@ Ext.define("Cart.view.Main", {
 
                         listeners: {
                             leafitemtap: function() {
-                                this.getDetailCard().setStore(arguments[4].getProductsStore);
+                                this.getDetailCard()
+                                    .setStore(arguments[4].getProductsStore);
                             }
                         },
 
@@ -50060,7 +50841,7 @@ Ext.define("Cart.view.Main", {
                                     var self = this.getId();
                                     Ext.get(self).on({
                                         tap: function(evt, dom) {
-                                            Cs.Cart.add(dom.getAttribute('id'), 1);
+                                            Cart.add(dom.getAttribute('id'), 1);
                                         },
                                         delegate: '.x-button'
                                     });
@@ -50075,15 +50856,247 @@ Ext.define("Cart.view.Main", {
                 title: 'About',
                 iconCls: 'info',
                 layout: 'fit',
-                padding: 10,
-                html: '<p>Simple shopping cart for Sencha Touch 2 demo.</p>' +
-                      '<p>Version: 1.0.1</p>' +
+                padding: 4,
+                styleHtmlContent: true,
+                html: '<p><strong>Simple shopping cart for Sencha Touch 2 demo</strong></p>' +
+                      '<p>Version: 1.1</p>' +
                       '<p>Author: Constantine Smirnov, <a href="http://mindsaur.com">http://mindsaur.com</a></p>' +
-                      '<p>License: GNU GPL v3.0</br></p>' +
+                      '<p>License: GNU GPL v3.0</p>' +
                       '<p>GitHub: <a href="https://github.com/kostysh/Simple-shopping-cart-for-Sencha-Touch-2">Simple-shopping-cart-for-Sencha-Touch-2</a></p>',
                 scrollable: 'vertical'
             }
         ]       
+    }
+});
+
+/**
+ * @filename Indicator.js
+ * @name Indicator for Simple Cart 
+ * @fileOverview Shopping cart indicator. Ext.Button based component 
+ *  with extra badge for displaying total sum
+ * 
+ * @author Constantine V. Smirnov kostysh(at)gmail.com
+ * @date 20120725
+ * @license GNU GPL v3.0
+ *
+ * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
+ * @requires Ext.Button component 
+ * @requires cart.css badge-total class
+ * 
+ * Usage:
+   
+   // Indicator config...
+    {
+        xtype: 'cartbtn'
+    }
+ 
+ *
+ */
+
+Ext.define('Ext.ux.Cart.Indicator', {
+    extend: 'Ext.Button',
+    xtype: 'cartbtn',
+    id: 'cartBtn',
+    
+    /**
+     * Override for Ext.Button template property 
+     */
+    template: [
+        {
+            tag: 'span',
+            reference: 'badgeElement',
+            hidden: true
+        },
+        {
+            tag: 'span',
+            className: 'badge-total',
+            reference: 'totalElement',
+            hidden: true
+        },
+        {
+            tag: 'span',
+            className: Ext.baseCSSPrefix + 'button-icon',
+            reference: 'iconElement',
+            hidden: true
+        },
+        {
+            tag: 'span',
+            reference: 'textElement',
+            hidden: true
+        }
+    ],
+
+    config: {
+        
+        /**
+         * @cfg {String} text 
+         * Text label on button
+         */
+        text: 'Cart',
+        
+        /**
+         * @cfg {String} ui 
+         * Button ui
+         */
+        ui: 'round',
+        
+        /**
+         * @cfg {String} totalBadgeText
+         * Text for tatalBadge
+         * @private
+         */
+        totalBadgeText: null,
+
+        /**
+         * @cfg {String} iconCls
+         * Icon style class
+         */
+        iconCls: 'cart',        
+        iconMask: true
+    },
+    
+    /**
+     * @private
+     */
+    updateTotalBadgeText: function(newText) {
+        if (newText && newText !== 0) {
+            this.totalElement.show();
+            this.totalElement.setText(newText);
+        } else {
+            this.totalElement.hide();
+            this.totalElement.setText('');
+        }
+    }
+});
+
+/**
+ * @filename Archive.js
+ * @name Panel for archive of submited carts
+ * @fileOverview Config for archived carts panel
+ * 
+ * @author Constantine V. Smirnov kostysh(at)gmail.com
+ * @date 20120725
+ * @license GNU GPL v3.0
+ *
+ * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
+ * @requires Ext.Panel  
+ * @requires Ext.ux.Cart.src.Cart
+ * @requires Ext.TitleBar
+ * @requires Ext.Button
+ * @requires cart.css With css classes: cart-archive, archive-date, archive-total
+ * 
+ */
+
+Ext.define('Ext.ux.Cart.Archive', {
+    extend: 'Ext.Panel',
+    xtype: 'archpanel',
+    id: 'archPanel',
+
+    requires: [
+        'Ext.TitleBar',
+        'Ext.Button'
+    ],
+
+    config: {
+        fullscreen: true,
+        showAnimation: {
+            type: 'slide'
+        },
+        zIndex: 0,
+        
+        /**
+         * @cfg {String} cls
+         * Cart panel container css style
+         */        
+        cls: 'cart-archive',
+        
+        /**
+         * @cfg {String} titleText
+         * Text on cart panel title
+         */        
+        titleText: 'Archive',
+        
+        /**
+         * @cfg {String} closeBtnText
+         * Text on close button
+         */
+        closeBtnText: 'Close',
+        
+        /**
+         * @cfg {String} clearBtnText
+         * Text on clear button
+         */
+        clearBtnText: 'Clear',
+		
+        layout: 'fit',
+        items: [
+            {
+                xtype: 'titlebar',
+                docked: 'top',
+                ui: 'light',
+                title: ''
+            },
+
+            {
+                xtype: 'toolbar',
+                docked: 'bottom',
+
+                items: [
+                    {
+                        id: 'closeArchBtn',
+                        xtype: 'button',                        
+                        text: ''
+                    },
+
+                    {
+                        xtype: 'spacer'
+                    },
+                    
+                    {
+                        id: 'clearArchBtn',
+                        xtype: 'button',                        
+                        ui: 'action',
+                        text: ''
+                    }
+                ]
+            },
+            
+            {
+                id: 'archList',
+                xtype: 'list',
+                itemTpl: '<div><span class="archive-date">{created}</span> ' + 
+                         '<span class="archive-total">{total}</span></div>',
+                onItemDisclosure: true,
+                disableSelection: true
+            }
+        ]
+    },
+    
+    /**
+     * @private
+     */
+    updateTitleText: function(text) {
+        if (text) {
+            this.down('titlebar').setTitle(text);
+        }
+    },
+    
+    /**
+     * @private
+     */
+    updateCloseBtnText: function(text) {
+        if (text) {
+            this.down('#closeArchBtn').setText(text);
+        }
+    },
+    
+    /**
+     * @private
+     */
+    updateClearBtnText: function(text) {
+        if (text) {
+            this.down('#clearArchBtn').setText(text);
+        }
     }
 });
 
@@ -50161,8 +51174,24 @@ Ext.define('Ext.Img', {
          * @cfg
          * @inheritdoc
          */
-        baseCls: Ext.baseCSSPrefix + 'img',
+        baseCls : Ext.baseCSSPrefix + 'img',
 
+        /**
+         * @cfg {String} imageCls The CSS class to be used when {@link #mode} is not set to 'background'
+         * @accessor
+         */
+        imageCls : Ext.baseCSSPrefix + 'img-image',
+
+        /**
+         * @cfg {String} backgroundCls The CSS class to be used when {@link #mode} is set to 'background'
+         * @accessor
+         */
+        backgroundCls : Ext.baseCSSPrefix + 'img-background',
+
+        /**
+         * @cfg {String} mode If set to 'background', uses a background-image CSS property instead of an
+         * `<img>` tag to display the image.
+         */
         mode: 'background'
     },
 
@@ -50199,16 +51228,31 @@ Ext.define('Ext.Img', {
     },
 
     updateMode: function(mode) {
+        var me            = this,
+            imageCls      = me.getImageCls(),
+            backgroundCls = me.getBackgroundCls();
+
         if (mode === 'background') {
-            if (this.imageElement) {
-                this.imageElement.destroy();
-                delete this.imageElement;
-                this.updateSrc(this.getSrc());
+            if (me.imageElement) {
+                me.imageElement.destroy();
+                delete me.imageElement;
+                me.updateSrc(me.getSrc());
             }
+
+            me.replaceCls(imageCls, backgroundCls);
+        } else {
+            me.imageElement = me.element.createChild({ tag: 'img' });
+
+            me.replaceCls(backgroundCls, imageCls);
         }
-        else {
-            this.imageElement = this.element.createChild({ tag: 'img' });
-        }
+    },
+
+    updateImageCls : function (newCls, oldCls) {
+        this.replaceCls(oldCls, newCls);
+    },
+
+    updateBackgroundCls : function (newCls, oldCls) {
+        this.replaceCls(oldCls, newCls);
     },
 
     onTap: function(e) {
@@ -50605,7 +51649,10 @@ Ext.define('Ext.field.Spinner', {
 
     /**
      * @event change
-     * @hide
+     * Fires just before the field blurs if the field value has changed
+     * @param {Ext.field.Text} this This field
+     * @param {Number} newValue The new value
+     * @param {Number} oldValue The original value
      */
 
     /**
@@ -50638,10 +51685,10 @@ Ext.define('Ext.field.Spinner', {
         maxValue: Number.MAX_VALUE,
 
         /**
-         * @cfg {Number} increment Value that is added or subtracted from the current value when a spinner is used.
+         * @cfg {Number} stepValue Value that is added or subtracted from the current value when a spinner is used.
          * @accessor
          */
-        increment: 0.1,
+        stepValue: 0.1,
 
         /**
          * @cfg {Boolean} accelerateOnTapHold True if autorepeating should start slowly and accelerate.
@@ -50692,10 +51739,14 @@ Ext.define('Ext.field.Spinner', {
     },
 
     constructor: function() {
-        this.callParent(arguments);
+        var me = this;
 
-        if (!this.getValue()) {
-            this.setValue(this.getDefaultValue());
+        me.callParent(arguments);
+
+        if (!me.getValue()) {
+            me.suspendEvents();
+            me.setValue(me.getDefaultValue());
+            me.resumeEvents();
         }
     },
 
@@ -50778,21 +51829,21 @@ Ext.define('Ext.field.Spinner', {
 
     // @private
     onSpinDown: function() {
-        if (!this.getDisabled()) {
+        if (!this.getDisabled() && !this.getReadOnly()) {
             this.spin(true);
         }
     },
 
     // @private
     onSpinUp: function() {
-        if (!this.getDisabled()) {
+        if (!this.getDisabled() && !this.getReadOnly()) {
             this.spin(false);
         }
     },
 
     // @private
     onTouchStart: function(repeater) {
-        if (!this.getDisabled()) {
+        if (!this.getDisabled() && !this.getReadOnly()) {
             repeater.getEl().addCls(Ext.baseCSSPrefix + 'button-pressed');
         }
     },
@@ -50806,17 +51857,17 @@ Ext.define('Ext.field.Spinner', {
     spin: function(down) {
         var me = this,
             originalValue = me.getValue(),
-            increment = me.getIncrement(),
+            stepValue = me.getStepValue(),
             direction = down ? 'down' : 'up',
             minValue = me.getMinValue(),
             maxValue = me.getMaxValue(),
             value;
 
         if (down) {
-            value = originalValue - increment;
+            value = originalValue - stepValue;
         }
         else {
-            value = originalValue + increment;
+            value = originalValue + stepValue;
         }
 
         //if cycle is true, then we need to check fi the value hasn't changed and we cycle the value
@@ -50874,7 +51925,7 @@ Ext.define('Ext.field.Spinner', {
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
- * @requires Cs.component.cart.src.Cart Definition of Cart singleton
+ * @requires Ext.ux.Cart.src.Cart Definition of Cart singleton
  * @requires Ext.Container
  * @requires Ext.Img 
  * @requires Ext.field.Spinner 
@@ -50883,12 +51934,11 @@ Ext.define('Ext.field.Spinner', {
  * 
  */
 
-Ext.define('Cs.component.cart.ItemLine', {
+Ext.define('Ext.ux.Cart.ItemLine', {
     extend: 'Ext.Container',
     xtype: 'itemline',
 
     requires: [
-        'Cs.component.cart.src.Cart',
         'Ext.Img',
         'Ext.field.Spinner'
     ],
@@ -50967,13 +52017,16 @@ Ext.define('Cs.component.cart.ItemLine', {
                 labelWidth: '60%',
                 labelWrap: true,
                 labelAlign: 'right',
-                increment: 1,
+                stepValue: 1,// From 2.1 Beta
                 minValue: 0,
                 maxValue: 100
             }
         ]
     },
     
+    /**
+     * @private
+     */
     beforeInitialize: function() {
         
         // Shortcuts to product template elements 
@@ -50996,12 +52049,12 @@ Ext.define('Cs.component.cart.ItemLine', {
             this.textEl.setHtml(product['text']);
             this.priceEl.setHtml('Price: ' + 
                                  product['price'] + ' ' + 
-                                 Cs.Cart.getCurrency());
+                                 Cart.getCurrency());
             this.weightEl.setHtml('Weight: ' + product['weight']);
             this.quantityEl.setValue(product['quantity']);
             this.quantityEl.setLabel('Subtotal: ' + 
                                      product['price'] * product['quantity'] + ' ' +
-                                     Cs.Cart.getCurrency());
+                                     Cart.getCurrency());
         }
     }
 });
@@ -51012,21 +52065,21 @@ Ext.define('Cs.component.cart.ItemLine', {
  * @fileOverview Config for default compoment for component DataView
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120719
+ * @date 20120725
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.dataview.component.DataItem
- * @requires Cs.component.cart.ItemLine
+ * @requires Ext.ux.Cart.ItemLine
  * 
  */
 
-Ext.define('Cs.component.cart.Item', {
+Ext.define('Ext.ux.Cart.Item', {
     extend: 'Ext.dataview.component.DataItem',
     xtype: 'cartitem',
 
     requires: [
-        'Cs.component.cart.ItemLine'
+        'Ext.ux.Cart.ItemLine'
     ],
 
     config: {
@@ -51046,7 +52099,7 @@ Ext.define('Cs.component.cart.Item', {
      */
     applyItemLine: function(config) {
         return Ext.factory(config, 
-                           Cs.component.cart.ItemLine, 
+                           Ext.ux.Cart.ItemLine, 
                            this.getItemLine());
     },
     
@@ -51077,17 +52130,17 @@ Ext.define('Cs.component.cart.Item', {
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.DataView
- * @requires Cs.component.cart.Item
+ * @requires Ext.ux.Cart.Item
  * @requires cart.css With definition of cart-items-list css class
  * 
  */
 
-Ext.define('Cs.component.cart.ItemsList', {
+Ext.define('Ext.ux.Cart.ItemsList', {
     extend: 'Ext.DataView',
     xtype: 'itemslist',
 
     requires: [
-        'Cs.component.cart.Item'
+        'Ext.ux.Cart.Item'
     ],
 
     config: {
@@ -51111,27 +52164,26 @@ Ext.define('Cs.component.cart.ItemsList', {
  * @fileOverview Config for shopping cart content panel view
  * 
  * @author Constantine V. Smirnov kostysh(at)gmail.com
- * @date 20120628
+ * @date 20120725
  * @license GNU GPL v3.0
  *
  * @requires Sencha Touch 2.0 SDK http://www.sencha.com/products/touch/
  * @requires Ext.Panel  
- * @requires Cs.component.cart.src.Cart
- * @requires Cs.component.cart.ItemsList
+ * @requires Ext.ux.Cart.src.Cart
+ * @requires Ext.ux.Cart.ItemsList
  * @requires Ext.TitleBar
  * @requires Ext.Button
  * @requires cart.css With css classes: cart-panel, cart-panel-totalbar > title > total
  * 
  */
 
-Ext.define('Cs.component.cart.Panel', {
+Ext.define('Ext.ux.Cart.Panel', {
     extend: 'Ext.Panel',
     xtype: 'cartpanel',
     id: 'cartPanel',
 
     requires: [
-        'Cs.component.cart.src.Cart',
-        'Cs.component.cart.ItemsList',
+        'Ext.ux.Cart.ItemsList',
         'Ext.TitleBar',
         'Ext.Button'
     ],
@@ -51141,6 +52193,7 @@ Ext.define('Cs.component.cart.Panel', {
         showAnimation: {
             type: 'slide'
         },
+        zIndex: 0,
         
         /**
          * @cfg {String} cls
@@ -51178,7 +52231,17 @@ Ext.define('Cs.component.cart.Panel', {
                 xtype: 'titlebar',
                 docked: 'top',
                 ui: 'light',
-                title: ''
+                title: '',
+                
+                items: [
+                    {
+                        id: 'archBtn',
+                        xtype: 'button',
+                        iconCls: 'more',
+                        iconMask: true,
+                        align: 'left'
+                    }
+                ]
             },
 
             {
@@ -51428,7 +52491,7 @@ Ext.define('Ext.data.reader.Array', {
     }
 });
 Ext.Loader.setPath({
-    'Cs': 'src'
+    'Ext.ux': 'src/ux'
 });
 
 Ext.application({
@@ -51440,7 +52503,7 @@ Ext.application({
 
     requires: [
         'Ext.MessageBox',
-        'Cs.component.cart.src.Cart'
+        'Ext.ux.Cart.src.Cart'
     ],
 
     views: [
@@ -51457,8 +52520,9 @@ Ext.application({
     ],
     
     controllers: [
-        'Cs.component.cart.controller.Indicator',
-        'Cs.component.cart.controller.Panel'
+        'Ext.ux.Cart.controller.Indicator',
+        'Ext.ux.Cart.controller.Panel',
+        'Ext.ux.Cart.controller.Archive'
     ],
 
     icon: {
@@ -51485,13 +52549,13 @@ Ext.application({
         Ext.fly('appLoadingIndicator').destroy();
 
         // Initialize shopping cart products store
-        Cs.Cart.setProductsStore('Categories');
+        Cart.setProductsStore('Categories');
 
         // Setup currency
-        Cs.Cart.setCurrency('USD');
+        Cart.setCurrency('USD');
 
         // Setup cart submit callback
-        Cs.Cart.setCallback(function(encData) {
+        Cart.setCallback(function(encData) {
 			
             /**
              * You can use cart data as you want
@@ -51517,6 +52581,7 @@ Ext.application({
             "This application has just successfully been updated to the latest version. Reload now?",
             function(buttonId) {
                 if (buttonId === 'yes') {
+                    localStorage.clear();
                     window.location.reload();
                 }
             }

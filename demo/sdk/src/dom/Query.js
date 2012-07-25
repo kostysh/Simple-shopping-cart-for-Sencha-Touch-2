@@ -2,9 +2,12 @@
  * @class Ext.DomQuery
  * @alternateClassName Ext.dom.Query
  *
- * Provides functionality to select elements on the page based on a CSS selector. All selectors, attribute filters and
- * pseudos below can be combined infinitely in any order. For example "div.foo:nth-child(odd)[@foo=bar].bar:first"
- * would be a perfectly valid selector.
+ * Provides functionality to select elements on the page based on a CSS selector. Delegates to
+ * document.querySelectorAll. More information can be found at
+ * [http://www.w3.org/TR/css3-selectors/](http://www.w3.org/TR/css3-selectors/)
+ *
+ * All selectors, attribute filters and pseudos below can be combined infinitely in any order. For example
+ * `div.foo:nth-child(odd)[@foo=bar].bar:first` would be a perfectly valid selector.
  *
  * ## Element Selectors:
  *
@@ -41,8 +44,6 @@
  * * E:nth(n) the nth E in the resultset (1 based)
  * * E:odd shortcut for :nth-child(odd)
  * * E:even shortcut for :nth-child(even)
- * * E:contains(foo) E's innerHTML contains the substring "foo"
- * * E:nodeValue(foo) E contains a textNode with a nodeValue that equals "foo"
  * * E:not(S) an E element that does not match simple selector S
  * * E:has(S) an E element that has a descendent that matches simple selector S
  * * E:next(S) an E element whose next sibling matches simple selector S

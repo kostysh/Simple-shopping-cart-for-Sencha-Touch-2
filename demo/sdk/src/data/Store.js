@@ -1026,7 +1026,7 @@ Ext.define('Ext.data.Store', {
      * @param {Boolean} silent Prevent the `clear` event from being fired.
      */
     removeAll: function(silent) {
-        if (silent !== true) {
+        if (silent !== true && this.eventFiringSuspended !== true) {
             this.fireAction('clear', [this], 'doRemoveAll');
         } else {
             this.doRemoveAll.call(this, true);
@@ -1367,7 +1367,7 @@ Ext.define('Ext.data.Store', {
      */
     filter: function(property, value, anyMatch, caseSensitive) {
         var data = this.data,
-            filter = property ? ((Ext.isFunction(property) || property.isFilter) ? property : {
+            filter = property ? ((Ext.isFunction(property) || Ext.isArray(property) || property.isFilter) ? property : {
                 property     : property,
                 value        : value,
                 anyMatch     : anyMatch,
@@ -1458,8 +1458,16 @@ Ext.define('Ext.data.Store', {
      * Returns true if this store is currently filtered
      * @return {Boolean}
      */
-    isFiltered: function() {
+    isFiltered : function () {
         return this.data.filtered;
+    },
+
+    /**
+     * Returns true if this store is currently sorted
+     * @return {Boolean}
+     */
+    isSorted : function () {
+        return this.data.sorted;
     },
 
     getSorters: function() {
@@ -1916,17 +1924,22 @@ Ext.define('Ext.data.Store', {
             syncRemovedRecords = me.getSyncRemovedRecords(),
             currentRecords = data.all.slice(),
             removed = me.removed,
-            ln = currentRecords.length,
+            ln = currentRecords.length, 
+            ln2 = records.length,
+            ids = {},
             i, record;
 
         if (operation.getAddRecords() !== true) {
+            for (i = 0; i < ln2; i++) {
+                ids[records[i].id] = true;
+            }
             for (i = 0; i < ln; i++) {
                 record = currentRecords[i];
                 record.unjoin(me);
 
                 // If the record we are removing is not part of the records we are about to add to the store then handle
                 // the destroying or removing of the record to avoid memory leaks.
-                if (records.indexOf(record) === -1) {
+                if (ids[record.id] !== true) {
                     if (syncRemovedRecords && record.phantom !== true) {
                         removed.push(record);
                     }
@@ -1935,11 +1948,11 @@ Ext.define('Ext.data.Store', {
                     }
                 }
             }
+
             data.clear();
             // This means we have to fire a clear event though
             me.fireEvent('clear', me);
         }
-
         if (records && records.length) {
             // Now lets add the records without firing an addrecords event
             me.suspendEvents();
@@ -2079,6 +2092,11 @@ Ext.define('Ext.data.Store', {
      */
     previousPage: function(options) {
         this.loadPage(this.currentPage - 1, options);
+    },
+
+    destroy: function() {
+        Ext.data.StoreManager.unregister(this);
+        this.callParent(arguments);
     }
 
     // <deprecated product=touch since=2.0>

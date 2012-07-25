@@ -168,19 +168,24 @@ Ext.define('Ext.navigation.View', {
 
     // @private
     initialize: function() {
+        var me     = this,
+            navBar = me.getNavigationBar();
+
         //add a listener onto the back button in the navigationbar
-        this.getNavigationBar().on({
-            back: this.onBackButtonTap,
-            scope: this
+        navBar.on({
+            back: me.onBackButtonTap,
+            scope: me
         });
 
-        this.relayEvents(this, {
+        me.relayEvents(navBar, 'rightbuttontap');
+
+        me.relayEvents(me, {
             add: 'push',
             remove: 'pop'
         });
 
         //<debug>
-        var layout = this.getLayout();
+        var layout = me.getLayout();
         if (layout && !layout.isCard) {
             Ext.Logger.error('The base layout for a NavigationView must always be a Card Layout');
         }
@@ -216,7 +221,7 @@ Ext.define('Ext.navigation.View', {
 
     /**
      * Removes the current active view from the stack and sets the previous view using the default animation
-     * of this view.
+     * of this view. You can also pass a {@link Ext.ComponentQuery} selector to target what inner item to pop to.
      * @param {Number} count The number of views you want to pop
      * @return {Ext.Component} The new active item
      */
@@ -234,9 +239,26 @@ Ext.define('Ext.navigation.View', {
      */
     beforePop: function(count) {
         var me = this,
-            innerItems = this.getInnerItems(),
-            ln = innerItems.length,
-            toRemove, i;
+            innerItems = me.getInnerItems();
+
+        if (Ext.isString(count) || Ext.isObject(count)) {
+            var last = innerItems.length - 1,
+                i;
+
+            for (i = last; i >= 0; i--) {
+                if ((Ext.isString(count) && Ext.ComponentQuery.is(innerItems[i], count)) || (Ext.isObject(count) && count == innerItems[i])) {
+                    count = last - i;
+                    break;
+                }
+            }
+
+            if (!Ext.isNumber(count)) {
+                return false;
+            }
+        }
+
+        var ln = innerItems.length,
+            toRemove;
 
         //default to 1 pop
         if (!Ext.isNumber(count) || count < 1) {
@@ -335,12 +357,6 @@ Ext.define('Ext.navigation.View', {
         }
 
         if (newNavigationBar) {
-            var layout = this.getLayout(),
-                animation = (layout && layout.isLayout) ? layout.getAnimation() : false;
-
-            if (animation && animation.isAnimation) {
-                newNavigationBar.setAnimation(animation.config);
-            }
             this.add(newNavigationBar);
         }
     },

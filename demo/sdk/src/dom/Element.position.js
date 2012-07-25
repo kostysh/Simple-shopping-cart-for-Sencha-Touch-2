@@ -25,21 +25,11 @@ Ext.dom.Element.override({
      */
 
     getXY: function() {
-        var webkitConvert = window.webkitConvertPointFromNodeToPage;
+        var rect = this.dom.getBoundingClientRect(),
+            round = Math.round;
 
-        if (webkitConvert) {
-            return function() {
-                var point = webkitConvert(this.dom, new WebKitPoint(0, 0));
-                return [point.x, point.y];
-            }
-        }
-        else return function() {
-            var rect = this.dom.getBoundingClientRect(),
-                round = Math.round;
-
-            return [round(rect.left + window.pageXOffset), round(rect.top + window.pageYOffset)];
-        }
-    }(),
+        return [round(rect.left + window.pageXOffset), round(rect.top + window.pageYOffset)];
+    },
 
     /**
      * Returns the offsets of this element from the passed element. Both element must be part of the DOM tree

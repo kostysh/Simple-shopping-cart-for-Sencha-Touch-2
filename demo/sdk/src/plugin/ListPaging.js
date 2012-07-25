@@ -63,7 +63,7 @@ Ext.define('Ext.plugin.ListPaging', {
         ].join(''),
 
         /**
-         * @cfg
+         * @cfg {Object} loadMoreCmp
          * @private
          */
         loadMoreCmp: {

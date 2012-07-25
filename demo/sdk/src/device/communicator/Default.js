@@ -161,7 +161,18 @@ Ext.define('Ext.device.communicator.Default', {
         var xhr = new XMLHttpRequest();
 
         xhr.open('GET', this.SERVER_URL + '?' + Ext.Object.toQueryString(args), false);
-        xhr.send(null);
+
+        // wrap the request in a try/catch block so we can check if any errors are thrown and attempt to call any
+        // failure/callback functions if defined
+        try {
+            xhr.send(null);
+        } catch(e) {
+            if (args.failure) {
+                this.invoke(args.failure);
+            } else if (args.callback) {
+                this.invoke(args.callback);
+            }
+        }
     }
 });
 

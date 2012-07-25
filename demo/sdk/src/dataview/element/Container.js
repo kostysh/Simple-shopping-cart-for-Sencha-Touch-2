@@ -8,7 +8,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemtouchstart
      * Fires whenever an item is touched
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item touched
+     * @param {Ext.dom.Element} item The item touched
      * @param {Number} index The index of the item touched
      * @param {Ext.EventObject} e The event object
      */
@@ -17,7 +17,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemtouchmove
      * Fires whenever an item is moved
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item moved
+     * @param {Ext.dom.Element} item The item moved
      * @param {Number} index The index of the item moved
      * @param {Ext.EventObject} e The event object
      */
@@ -26,7 +26,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemtouchend
      * Fires whenever an item is touched
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item touched
+     * @param {Ext.dom.Element} item The item touched
      * @param {Number} index The index of the item touched
      * @param {Ext.EventObject} e The event object
      */
@@ -35,7 +35,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemtap
      * Fires whenever an item is tapped
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item tapped
+     * @param {Ext.dom.Element} item The item tapped
      * @param {Number} index The index of the item tapped
      * @param {Ext.EventObject} e The event object
      */
@@ -44,7 +44,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemtaphold
      * Fires whenever an item is tapped
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item tapped
+     * @param {Ext.dom.Element} item The item tapped
      * @param {Number} index The index of the item tapped
      * @param {Ext.EventObject} e The event object
      */
@@ -53,7 +53,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemsingletap
      * Fires whenever an item is doubletapped
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item singletapped
+     * @param {Ext.dom.Element} item The item singletapped
      * @param {Number} index The index of the item singletapped
      * @param {Ext.EventObject} e The event object
      */
@@ -62,7 +62,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemdoubletap
      * Fires whenever an item is doubletapped
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item doubletapped
+     * @param {Ext.dom.Element} item The item doubletapped
      * @param {Number} index The index of the item doubletapped
      * @param {Ext.EventObject} e The event object
      */
@@ -71,7 +71,7 @@ Ext.define('Ext.dataview.element.Container', {
      * @event itemswipe
      * Fires whenever an item is swiped
      * @param {Ext.dataview.element.Container} this
-     * @param {Ext.dataview.component.DataItem} item The item swiped
+     * @param {Ext.dom.Element} item The item swiped
      * @param {Number} index The index of the item swiped
      * @param {Ext.EventObject} e The event object
      */
@@ -246,7 +246,7 @@ Ext.define('Ext.dataview.element.Container', {
 
         for (; i >= 0; i--) {
             item = items[from + i];
-            item.parentNode.removeChild(item);
+            Ext.get(item).destroy();
         }
         if (me.getViewItems().length == 0) {
             this.dataview.showEmptyText();
@@ -291,7 +291,7 @@ Ext.define('Ext.dataview.element.Container', {
             i = 0;
 
         for (; i < ln; i++) {
-            Ext.removeNode(elements[i]);
+            Ext.get(elements[i]).destroy();
         }
         this.callParent();
     }

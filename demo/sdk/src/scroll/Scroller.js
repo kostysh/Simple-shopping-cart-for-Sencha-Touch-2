@@ -104,12 +104,6 @@ Ext.define('Ext.scroll.Scroller', {
          * @cfg
          * @private
          */
-        translationMethod: 'auto',
-
-        /**
-         * @cfg
-         * @private
-         */
         fps: 'auto',
 
         /**
@@ -203,12 +197,6 @@ Ext.define('Ext.scroll.Scroller', {
          * @cfg
          * @private
          */
-        containerScrollSize: 'auto',
-
-        /**
-         * @cfg
-         * @private
-         */
         size: 'auto',
 
         /**
@@ -261,6 +249,11 @@ Ext.define('Ext.scroll.Scroller', {
 
         slotSnapEasing: {
             duration: 150
+        },
+
+        translatable: {
+            translationMethod: 'auto',
+            useWrapper: false
         }
     },
 
@@ -282,9 +275,6 @@ Ext.define('Ext.scroll.Scroller', {
     constructor: function(config) {
         var element = config && config.element;
 
-        this.doAnimationFrame = Ext.Function.bind(this.doAnimationFrame, this);
-        this.stopAnimation = Ext.Function.bind(this.stopAnimation, this);
-
         this.listeners = {
             scope: this,
             touchstart: 'onTouchStart',
@@ -297,8 +287,6 @@ Ext.define('Ext.scroll.Scroller', {
         this.minPosition = { x: 0, y: 0 };
 
         this.startPosition = { x: 0, y: 0 };
-
-        this.size = { x: 0, y: 0 };
 
         this.position = { x: 0, y: 0 };
 
@@ -354,26 +342,19 @@ Ext.define('Ext.scroll.Scroller', {
         return this;
     },
 
-    getTranslatable: function() {
-        if (!this.hasOwnProperty('translatable')) {
-            var bounceEasing = this.getBounceEasing();
+    applyTranslatable: function(config, translatable) {
+        return Ext.factory(config, Ext.util.Translatable, translatable);
+    },
 
-            this.translatable = new Ext.util.Translatable({
-                translationMethod: this.getTranslationMethod(),
-                element: this.getElement(),
-                easingX: bounceEasing.x,
-                easingY: bounceEasing.y,
-                useWrapper: false,
-                listeners: {
-                    animationframe: 'onAnimationFrame',
-                    animationend: 'onAnimationEnd',
-                    axisanimationend: 'onAxisAnimationEnd',
-                    scope: this
-                }
-            });
-        }
-
-        return this.translatable;
+    updateTranslatable: function(translatable) {
+        translatable.setConfig({
+            element: this.getElement(),
+            listeners: {
+                animationframe: 'onAnimationFrame',
+                animationend: 'onAnimationEnd',
+                scope: this
+            }
+        });
     },
 
     updateFps: function(fps) {
@@ -422,7 +403,7 @@ Ext.define('Ext.scroll.Scroller', {
         position.x = x = initialOffset.x;
         position.y = y = initialOffset.y;
 
-        this.getTranslatable().doTranslate(-x, -y);
+        this.getTranslatable().translate(-x, -y);
     },
 
     /**
@@ -496,6 +477,10 @@ Ext.define('Ext.scroll.Scroller', {
             x: Ext.factory(easing, defaultClass),
             y: Ext.factory(easing, defaultClass)
         };
+    },
+
+    updateBounceEasing: function(easing) {
+        this.getTranslatable().setEasingX(easing.x).setEasingY(easing.y);
     },
 
     /**
@@ -603,33 +588,9 @@ Ext.define('Ext.scroll.Scroller', {
             x = dom.offsetWidth;
             y = dom.offsetHeight;
         }
-        else {
-            x = size.x;
-            y = size.y;
-        }
-
-        return {
-            x: x,
-            y: y
-        };
-    },
-
-    /**
-     * @private
-     */
-    applyContainerScrollSize: function(size) {
-        var containerDom = this.getContainer().dom,
-            x, y;
-
-        if (!containerDom) {
-            return;
-        }
-
-        this.givenContainerScrollSize = size;
-
-        if (size === 'auto') {
-            x = containerDom.scrollWidth;
-            y = containerDom.scrollHeight;
+        else if (typeof size == 'number') {
+            x = size;
+            y = size;
         }
         else {
             x = size.x;
@@ -724,7 +685,6 @@ Ext.define('Ext.scroll.Scroller', {
         this.getTranslatable().refresh();
         this.setSize(this.givenSize);
         this.setContainerSize(this.givenContainerSize);
-        this.setContainerScrollSize(this.givenContainerScrollSize);
         this.setDirection(this.givenDirection);
 
         this.fireEvent('refresh', this);
@@ -808,7 +768,7 @@ Ext.define('Ext.scroll.Scroller', {
             }
             else {
                 this.fireEvent('scroll', this, position.x, position.y);
-                translatable.doTranslate(translationX, translationY);
+                translatable.translate(translationX, translationY);
             }
         }
 
@@ -829,7 +789,10 @@ Ext.define('Ext.scroll.Scroller', {
      * @return {Ext.scroll.Scroller} this
      */
     scrollToEnd: function(animation) {
-        return this.scrollTo(0, this.getSize().y - this.getContainerSize().y, animation);
+        var size    = this.getSize(),
+            cntSize = this.getContainerSize();
+
+        return this.scrollTo(size.x - cntSize.x, size.y - cntSize.y, animation);
     },
 
     /**
@@ -1093,10 +1056,6 @@ Ext.define('Ext.scroll.Scroller', {
         this.fireEvent('scroll', this, position.x, position.y);
     },
 
-    onAxisAnimationEnd: function(axis) {
-
-    },
-
     /**
      * @private
      */
@@ -1221,7 +1180,7 @@ Ext.define('Ext.scroll.Scroller', {
             this.getContainer().removeCls(this.containerCls);
         }
 
-        Ext.destroy(this.translatable);
+        Ext.destroy(this.getTranslatable());
 
         this.callParent(arguments);
     }

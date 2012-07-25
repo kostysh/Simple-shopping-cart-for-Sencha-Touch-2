@@ -44,7 +44,10 @@ Ext.define('Ext.field.Spinner', {
 
     /**
      * @event change
-     * @hide
+     * Fires just before the field blurs if the field value has changed
+     * @param {Ext.field.Text} this This field
+     * @param {Number} newValue The new value
+     * @param {Number} oldValue The original value
      */
 
     /**
@@ -77,10 +80,10 @@ Ext.define('Ext.field.Spinner', {
         maxValue: Number.MAX_VALUE,
 
         /**
-         * @cfg {Number} increment Value that is added or subtracted from the current value when a spinner is used.
+         * @cfg {Number} stepValue Value that is added or subtracted from the current value when a spinner is used.
          * @accessor
          */
-        increment: 0.1,
+        stepValue: 0.1,
 
         /**
          * @cfg {Boolean} accelerateOnTapHold True if autorepeating should start slowly and accelerate.
@@ -131,10 +134,14 @@ Ext.define('Ext.field.Spinner', {
     },
 
     constructor: function() {
-        this.callParent(arguments);
+        var me = this;
 
-        if (!this.getValue()) {
-            this.setValue(this.getDefaultValue());
+        me.callParent(arguments);
+
+        if (!me.getValue()) {
+            me.suspendEvents();
+            me.setValue(me.getDefaultValue());
+            me.resumeEvents();
         }
     },
 
@@ -217,21 +224,21 @@ Ext.define('Ext.field.Spinner', {
 
     // @private
     onSpinDown: function() {
-        if (!this.getDisabled()) {
+        if (!this.getDisabled() && !this.getReadOnly()) {
             this.spin(true);
         }
     },
 
     // @private
     onSpinUp: function() {
-        if (!this.getDisabled()) {
+        if (!this.getDisabled() && !this.getReadOnly()) {
             this.spin(false);
         }
     },
 
     // @private
     onTouchStart: function(repeater) {
-        if (!this.getDisabled()) {
+        if (!this.getDisabled() && !this.getReadOnly()) {
             repeater.getEl().addCls(Ext.baseCSSPrefix + 'button-pressed');
         }
     },
@@ -245,17 +252,17 @@ Ext.define('Ext.field.Spinner', {
     spin: function(down) {
         var me = this,
             originalValue = me.getValue(),
-            increment = me.getIncrement(),
+            stepValue = me.getStepValue(),
             direction = down ? 'down' : 'up',
             minValue = me.getMinValue(),
             maxValue = me.getMaxValue(),
             value;
 
         if (down) {
-            value = originalValue - increment;
+            value = originalValue - stepValue;
         }
         else {
-            value = originalValue + increment;
+            value = originalValue + stepValue;
         }
 
         //if cycle is true, then we need to check fi the value hasn't changed and we cycle the value
@@ -312,10 +319,23 @@ Ext.define('Ext.field.Spinner', {
                  */
                 if (config.hasOwnProperty('incrementValue')) {
                     //<debug warn>
-                    Ext.Logger.deprecate("'incrementValue' config is deprecated, please use 'increment' config instead", this);
+                    Ext.Logger.deprecate("'incrementValue' config is deprecated, please use 'stepValue' config instead", this);
                     //</debug>
-                    config.increment = config.incrementValue;
+                    config.stepValue = config.incrementValue;
                     delete config.incrementValue;
+                }
+
+                /**
+                 * @cfg {String} increment
+                 * The increment value of this spinner field.
+                 * @deprecated 2.0.0 Please use {@link #stepValue} instead
+                 */
+                if (config.hasOwnProperty('increment')) {
+                    //<debug warn>
+                    Ext.Logger.deprecate("'increment' config is deprecated, please use 'stepValue' config instead", this);
+                    //</debug>
+                    config.stepValue = config.increment;
+                    delete config.increment;
                 }
             }
 

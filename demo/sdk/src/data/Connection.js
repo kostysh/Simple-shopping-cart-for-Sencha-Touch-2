@@ -201,7 +201,7 @@ Ext.define('Ext.data.Connection', {
      * @param {Object} options.success.response The XMLHttpRequest object containing the response data.
      * @param {Object} options.success.options The parameter to the request call.
      *
-     * @param {Function} options.failure The function to be called upon success of the request.
+     * @param {Function} options.failure The function to be called upon failure of the request.
      * The callback is passed the following parameters:
      * @param {Object} options.failure.response The XMLHttpRequest object containing the response data.
      * @param {Object} options.failure.options The parameter to the request call.
@@ -293,7 +293,7 @@ Ext.define('Ext.data.Connection', {
 
             // create the transaction object
             request = {
-                id: ++this.self.requestId,
+                id: ++Ext.data.Connection.requestId,
                 xhr: xhr,
                 headers: headers,
                 options: options,

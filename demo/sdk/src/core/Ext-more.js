@@ -28,7 +28,7 @@
  *
  * [getting_started]: #!/guide/getting_started
  */
-Ext.setVersion('touch', '2.0.1.1');
+Ext.setVersion('touch', '2.1.0-beta1');
 
 Ext.apply(Ext, {
     /**
@@ -312,6 +312,13 @@ function(el){
      */
     isSetup: false,
 
+    /**
+     * This indicate the start timestamp of current cycle. 
+     * It is only reliable during dom-event-initiated cycles and 
+     * {@link Ext.draw.fx.Frame} initiated cycles.
+     */
+    frameStartTime: +new Date(),
+    
     /**
      * @private
      */

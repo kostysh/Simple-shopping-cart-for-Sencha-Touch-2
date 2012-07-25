@@ -82,7 +82,7 @@ Ext.define('Ext.picker.Picker', {
     extend: 'Ext.Sheet',
     alias : 'widget.picker',
     alternateClassName: 'Ext.Picker',
-    requires: ['Ext.picker.Slot', 'Ext.Toolbar', 'Ext.data.Model'],
+    requires: ['Ext.picker.Slot', 'Ext.TitleBar', 'Ext.data.Model'],
 
     isPicker: true,
 
@@ -497,6 +497,7 @@ Ext.define('Ext.picker.Picker', {
         }
 
         for (key in values) {
+            slot = null;
             value = values[key];
             for (i = 0; i < slots.length; i++) {
                 loopSlot = slots[i];

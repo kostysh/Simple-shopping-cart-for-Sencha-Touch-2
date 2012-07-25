@@ -14,7 +14,7 @@
  *
  */
 Ext.define('Ext.Map', {
-    extend: 'Ext.Component',
+    extend: 'Ext.Container',
     xtype : 'map',
     requires: ['Ext.util.Geolocation'],
 
@@ -92,7 +92,7 @@ Ext.define('Ext.Map', {
 
     constructor: function() {
         this.callParent(arguments);
-        this.element.setVisibilityMode(Ext.Element.OFFSETS);
+        // this.element.setVisibilityMode(Ext.Element.OFFSETS);
 
         if (!(window.google || {}).maps) {
             this.setHtml('Google Maps API is required');
@@ -105,7 +105,22 @@ Ext.define('Ext.Map', {
             painted: 'doResize',
             scope: this
         });
-        this.element.on('touchstart', 'onTouchStart', this);
+        this.innerElement.on('touchstart', 'onTouchStart', this);
+    },
+
+    getElementConfig: function() {
+        return {
+            reference: 'element',
+            className: 'x-container',
+            children: [{
+                reference: 'innerElement',
+                className: 'x-inner',
+                children: [{
+                    reference: 'mapContainer',
+                    className: Ext.baseCSSPrefix + 'map-container'
+                }]
+            }]
+        };
     },
 
     onTouchStart: function(e) {
@@ -175,7 +190,7 @@ Ext.define('Ext.Map', {
     renderMap: function() {
         var me = this,
             gm = (window.google || {}).maps,
-            element = me.element,
+            element = me.mapContainer,
             mapOptions = me.getMapOptions(),
             map = me.getMap(),
             event;

@@ -372,7 +372,7 @@ Ext.define('Ext.util.Geolocation', {
         var timeout = this.getTimeout(),
             ret = {
                 maximumAge: this.getMaximumAge(),
-                allowHighAccuracy: this.getAllowHighAccuracy()
+                enableHighAccuracy: this.getAllowHighAccuracy()
             };
 
         //Google doesn't like Infinity

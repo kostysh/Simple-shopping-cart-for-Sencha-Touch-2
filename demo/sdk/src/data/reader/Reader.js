@@ -13,7 +13,7 @@
  *             url : 'users.json',
  *             reader: {
  *                 type: 'json',
- *                 rootPorperty: 'users'
+ *                 rootProperty: 'users'
  *             }
  *         },
  *     });
@@ -35,7 +35,7 @@
  * associations} configured on each Model. Below is an example demonstrating the flexibility of these associations in a
  * fictional CRM system which manages a User, their Orders, OrderItems and Products. First we'll define the models:
  *
- *     Ext.define("User", {
+ *     Ext.define('User', {
  *         extend: 'Ext.data.Model',
  *         config: {
  *             fields: [
@@ -49,13 +49,13 @@
  *                 url : 'users.json',
  *                 reader: {
  *                     type: 'json',
- *                     root: 'users'
+ *                     rootProperty: 'users'
  *                 }
  *             }
  *         }
  *     });
  *
- *     Ext.define("Order", {
+ *     Ext.define('Order', {
  *         extend: 'Ext.data.Model',
  *         config: {
  *             fields: [
@@ -67,7 +67,7 @@
  *         }
  *     });
  *
- *     Ext.define("OrderItem", {
+ *     Ext.define('OrderItem', {
  *         extend: 'Ext.data.Model',
  *         config: {
  *             fields: [
@@ -78,13 +78,15 @@
  *         }
  *     });
  *
- *     Ext.define("Product", {
+ *     Ext.define('Product', {
  *         extend: 'Ext.data.Model',
- *         fields: [
- *             'id', 'name'
- *         ],
+ *         config : {
+ *             fields: [
+ *                 'id', 'name'
+ *             ],
  *
- *         hasMany: 'OrderItem'
+ *             hasMany: 'OrderItem'
+ *         }
  *     });
  *
  * This may be a lot to take in - basically a User has many Orders, each of which is composed of several OrderItems.
@@ -130,7 +132,7 @@
  * and finally the Product associated with each OrderItem. Now we can read the data and use it as follows:
  *
  *     var store = Ext.create('Ext.data.Store', {
- *         model: "User"
+ *         model: 'User'
  *     });
  *
  *     store.load({
@@ -138,11 +140,11 @@
  *             //the user that was loaded
  *             var user = store.first();
  *
- *             console.log("Orders for " + user.get('name') + ":")
+ *             console.log('Orders for ' + user.get('name') + ':')
  *
  *             //iterate over the Orders for each User
  *             user.orders().each(function(order) {
- *                 console.log("Order ID: " + order.getId() + ", which contains items:");
+ *                 console.log('Order ID: ' + order.getId() + ', which contains items:');
  *
  *                 //iterate over the OrderItems for each Order
  *                 order.orderItems().each(function(orderItem) {
@@ -430,7 +432,7 @@ Ext.define('Ext.data.reader.Reader', {
     /**
      * @private
      * This will usually need to be implemented in a subclass. Given a generic data object (the type depends on the type
-     * of data we are reading), this function should return the object as configured by the Reader's 'root' meta data config.
+     * of data we are reading), this function should return the object as configured by the Reader's 'rootProperty' meta data config.
      * See XmlReader's getRoot implementation for an example. By default the same data object will simply be returned.
      * @param {Object} data The data object
      * @return {Object} The same data object

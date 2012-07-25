@@ -49,13 +49,43 @@ Ext.define('Ext.form.FieldSet', {
         baseCls: Ext.baseCSSPrefix + 'form-fieldset',
 
         /**
-         * @cfg {String} title Optional fieldset title, rendered just above the grouped fields
+         * @cfg {String} title
+         * Optional fieldset title, rendered just above the grouped fields.
+         *
+         * ## Example
+         *
+         *     Ext.create('Ext.form.Fieldset', {
+         *         fullscreen: true,
+         *
+         *         title: 'Login',
+         *
+         *         items: [{
+         *             xtype: 'textfield',
+         *             label: 'Email'
+         *         }]
+         *     });
+         * 
          * @accessor
          */
         title: null,
 
         /**
-         * @cfg {String} instructions Optional fieldset instructions, rendered just below the grouped fields
+         * @cfg {String} instructions
+         * Optional fieldset instructions, rendered just below the grouped fields.
+         *
+         * ## Example
+         *
+         *     Ext.create('Ext.form.Fieldset', {
+         *         fullscreen: true,
+         *
+         *         instructions: 'Please enter your email address.',
+         *
+         *         items: [{
+         *             xtype: 'textfield',
+         *             label: 'Email'
+         *         }]
+         *     });
+         * 
          * @accessor
          */
         instructions: null
@@ -86,6 +116,17 @@ Ext.define('Ext.form.FieldSet', {
     },
 
     // @private
+    getTitle: function() {
+        var title = this._title;
+
+        if (title && title instanceof Ext.Title) {
+            return title.getTitle();
+        }
+
+        return title;
+    },
+
+    // @private
     applyInstructions: function(instructions) {
         if (typeof instructions == 'string') {
             instructions = {title: instructions};
@@ -96,7 +137,7 @@ Ext.define('Ext.form.FieldSet', {
             baseCls: this.getBaseCls() + '-instructions'
         });
 
-        return Ext.factory(instructions, Ext.Title, this.getInstructions());
+        return Ext.factory(instructions, Ext.Title, this._instructions);
     },
 
     // @private
@@ -107,5 +148,54 @@ Ext.define('Ext.form.FieldSet', {
         if (oldInstructions) {
             this.remove(oldInstructions);
         }
+    },
+
+    // @private
+    getInstructions: function() {
+        var instructions = this._instructions;
+
+        if (instructions && instructions instanceof Ext.Title) {
+            return instructions.getTitle();
+        }
+
+        return instructions;
+    },
+
+    /**
+     * A convenient method to enable all fields in this fieldset
+     * @return {Ext.form.FieldSet} This FieldSet
+     */
+
+    /**
+     * A convenient method to disable all fields in this FieldSet
+     * @return {Ext.form.FieldSet} This FieldSet
+     */
+     
+    doSetDisabled: function(newDisabled) {
+        this.getFieldsAsArray().forEach(function(field) {
+            field.setDisabled(newDisabled);
+        });
+
+        return this;
+    },
+
+    /**
+     * @private
+     */
+    getFieldsAsArray: function() {
+        var fields = [],
+            getFieldsFrom = function(item) {
+                if (item.isField) {
+                    fields.push(item);
+                }
+
+                if (item.isContainer) {
+                    item.getItems().each(getFieldsFrom);
+                }
+            };
+
+        this.getItems().each(getFieldsFrom);
+
+        return fields;
     }
 });

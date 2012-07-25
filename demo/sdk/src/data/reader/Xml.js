@@ -277,7 +277,7 @@ Ext.define('Ext.data.reader.Xml', {
         }
         //</debug>
 
-        if (recordName != root.nodeName) {
+        if (recordName != root.nodeName && recordName !== root.localName) {
             root = Ext.DomQuery.select(recordName, root);
         } else {
             root = [root];
@@ -316,14 +316,22 @@ Ext.define('Ext.data.reader.Xml', {
      * This is used by buildExtractors to create optimized on extractor function which converts raw data into model instances.
      */
     createFieldAccessExpression: function(field, fieldVarName, dataName) {
-        var selector = field.getMapping() || field.getName(),
-            result;
+          var selector = field.getMapping() || field.getName(),
+              result;
 
-        if (typeof selector === 'function') {
-            result = fieldVarName + '.getMapping()(' + dataName + ', this)';
-        } else {
-            result = 'me.getNodeValue(Ext.DomQuery.selectNode("' + selector + '", ' + dataName + '))';
-        }
-        return result;
-    }
+          if (typeof selector === 'function') {
+              result = fieldVarName + '.getMapping()(' + dataName + ', this)';
+          }
+          else {
+                selector = selector.split('@');
+                if (selector.length === 2) {
+                    result = 'me.getNodeValue(Ext.DomQuery.selectNode("@' + selector[1] + '", Ext.DomQuery.selectNode("' + selector[0] + '", ' + dataName + ')))';
+                } else if (selector.length === 1) {
+                    result = 'me.getNodeValue(Ext.DomQuery.selectNode("' + selector[0] + '", ' + dataName + '))';
+                } else {
+                    throw "Unsupported query - too many queries for attributes in " + selector.join('@');
+                }
+          }
+          return result;
+      }
 });

@@ -4,7 +4,7 @@
  * Scroll position implementation
  */
 Ext.define('Ext.util.translatable.ScrollPosition', {
-    extend: 'Ext.util.translatable.Abstract',
+    extend: 'Ext.util.translatable.Dom',
 
     wrapperWidth: 0,
 
@@ -72,8 +72,6 @@ Ext.define('Ext.util.translatable.ScrollPosition', {
                 wrapper.scrollTop = this.wrapperHeight - y;
             }
         }
-
-        return this.callParent(arguments);
     },
 
     refresh: function() {

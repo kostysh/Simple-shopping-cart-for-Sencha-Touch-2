@@ -39,7 +39,7 @@
  * Now that we're no longer creating a new Model instance, the request method is changed to an HTTP PUT, targeting the
  * relevant url for that user. Now let's delete this user, which will use the DELETE method:
  *
- *         user.destroy(); //DELETE /users/123
+ *         user.erase(); //DELETE /users/123
  *
  * Finally, when we perform a load of a Model or Store, Rest proxy will use the GET method:
  *

@@ -116,11 +116,13 @@ Ext.define('Ext.mixin.Selectable', {
             }
             else {
                 oldStore.un(bindEvents);
+                newStore.un('clear', 'onSelectionStoreClear', this);
             }
         }
 
         if (newStore) {
             newStore.on(bindEvents);
+            newStore.onBefore('clear', 'onSelectionStoreClear', this);
             me.refreshSelection();
         }
     },
@@ -441,6 +443,11 @@ Ext.define('Ext.mixin.Selectable', {
                 me.fireSelectionChange([record]);
             }
         }
+    },
+
+    onSelectionStoreClear: function(store) {
+        var records = store.getData().items;
+        this.onSelectionStoreRemove(store, records);
     },
 
     /**

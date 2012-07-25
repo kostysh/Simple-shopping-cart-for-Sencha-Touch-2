@@ -6,7 +6,6 @@ Ext.define("Cart.view.Main", {
         'Ext.TitleBar',
         'Ext.dataview.List',
         'Ext.data.Store',
-        'Cs.component.cart.Indicator',
         'Ext.dataview.NestedList'
     ],
 
@@ -44,7 +43,8 @@ Ext.define("Cart.view.Main", {
 
                         listeners: {
                             leafitemtap: function() {
-                                this.getDetailCard().setStore(arguments[4].getProductsStore);
+                                this.getDetailCard()
+                                    .setStore(arguments[4].getProductsStore);
                             }
                         },
 
@@ -63,7 +63,7 @@ Ext.define("Cart.view.Main", {
                                     var self = this.getId();
                                     Ext.get(self).on({
                                         tap: function(evt, dom) {
-                                            Cs.Cart.add(dom.getAttribute('id'), 1);
+                                            Cart.add(dom.getAttribute('id'), 1);
                                         },
                                         delegate: '.x-button'
                                     });
@@ -78,11 +78,12 @@ Ext.define("Cart.view.Main", {
                 title: 'About',
                 iconCls: 'info',
                 layout: 'fit',
-                padding: 10,
-                html: '<p>Simple shopping cart for Sencha Touch 2 demo.</p>' +
-                      '<p>Version: 1.0.1</p>' +
+                padding: 4,
+                styleHtmlContent: true,
+                html: '<p><strong>Simple shopping cart for Sencha Touch 2 demo</strong></p>' +
+                      '<p>Version: 1.1</p>' +
                       '<p>Author: Constantine Smirnov, <a href="http://mindsaur.com">http://mindsaur.com</a></p>' +
-                      '<p>License: GNU GPL v3.0</br></p>' +
+                      '<p>License: GNU GPL v3.0</p>' +
                       '<p>GitHub: <a href="https://github.com/kostysh/Simple-shopping-cart-for-Sencha-Touch-2">Simple-shopping-cart-for-Sencha-Touch-2</a></p>',
                 scrollable: 'vertical'
             }

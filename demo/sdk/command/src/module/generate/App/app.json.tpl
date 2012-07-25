@@ -22,7 +22,10 @@
      * List of all JavaScript assets in the right execution order.
      * Each item is an object with the following format:
      *      {
-     *          "path": "path/to/script.js" // Relative path to this app.json file
+     *          "path": "path/to/script.js" // Path to file, if local file it must be relative to this app.json file
+     *          "remote": true              // (Optional)
+     *                                      // - Defaults to undefined (falsey) to signal a local file which will be copied
+     *                                      // - Specify true if this file is a remote file which will not to be copied
      *          "update": "delta"           // (Optional)
      *                                      //  - If not specified, this file will only be loaded once, and
      *                                      //    cached inside localStorage until this value is changed.
@@ -46,7 +49,10 @@
      * List of all CSS assets in the right inclusion order.
      * Each item is an object with the following format:
      *      {
-     *          "path": "path/to/item.css" // Relative path to this app.json file
+     *          "path": "path/to/item.css" // Path to file, if local file it must be relative to this app.json file
+     *          "remote": true             // (Optional)
+     *                                     // - Defaults to undefined (falsey) to signal a local file which will be copied
+     *                                     // - Specify true if this file is a remote file which will not to be copied
      *          "update": "delta"          // (Optional)
      *                                     //  - If not specified, this file will only be loaded once, and
      *                                     //    cached inside localStorage until this value is changed to either one below

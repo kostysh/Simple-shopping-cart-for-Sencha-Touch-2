@@ -39,7 +39,9 @@ Ext.define('Ext.Evented', {
                     }
                     else {
                         this[internalName] = value;
-                        this[doSetName].call(this, value, oldValue);
+                        if (this[doSetName]) {
+                            this[doSetName].call(this, value, oldValue);
+                        }
                     }
                 }
 
@@ -64,7 +66,9 @@ Ext.define('Ext.Evented', {
         var nameMap = options.nameMap;
 
         me[nameMap.internal] = value;
-        me[nameMap.doSet].call(this, value, oldValue);
+        if (me[nameMap.doSet]) {
+          me[nameMap.doSet].call(this, value, oldValue);
+        }
     },
 
     onClassExtended: function(Class, data) {

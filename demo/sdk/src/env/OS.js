@@ -203,6 +203,9 @@ Ext.define('Ext.env.OS', {
     else {
         if (!osEnv.is.Android && !osEnv.is.iOS && /Windows|Linux|MacOS/.test(osName)) {
             deviceType = 'Desktop';
+
+            // always set it to false when you are on a desktop
+            Ext.browser.is.WebView = false;
         }
         else if (osEnv.is.iPad || osEnv.is.Android3 || (osEnv.is.Android4 && userAgent.search(/mobile/i) == -1)) {
             deviceType = 'Tablet';

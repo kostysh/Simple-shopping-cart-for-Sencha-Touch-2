@@ -48,16 +48,7 @@ Ext.define('Ext.LoadMask', {
          * True to show the loading indicator on this {@link Ext.LoadMask}.
          * @accessor
          */
-        indicator: true,
-
-        /**
-         * @cfg
-         * @inheritdoc
-         */
-        listeners: {
-            painted: 'onPainted',
-            erased: 'onErased'
-        }
+        indicator: true
     },
 
     getTemplate: function() {
@@ -120,18 +111,22 @@ Ext.define('Ext.LoadMask', {
 
     onPainted: function() {
         this.getParent().on({
-            scope: this,
-            resize: this.refreshPosition
+            scope  : this,
+            resize : this.refreshPosition
         });
 
         this.refreshPosition();
+
+        this.callParent(arguments);
     },
 
     onErased: function() {
         this.getParent().un({
-            scope: this,
-            resize: this.refreshPosition
+            scope  : this,
+            resize : this.refreshPosition
         });
+
+        this.callParent(arguments);
     },
 
     /**

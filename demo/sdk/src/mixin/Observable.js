@@ -182,6 +182,26 @@ Ext.define('Ext.mixin.Observable', {
      * Fires the specified event with the passed parameters (minus the event name, plus the `options` object passed
      * to {@link #addListener}).
      *
+     * The first argument is the name of the event. Every other argument passed will be available when you listen for 
+     * the event.
+     *
+     * ## Example
+     *
+     * Firstly, we set up a listener for our new event.
+     *     
+     *     this.on('myevent', function(arg1, arg2, arg3, arg4, options, e) {
+     *         console.log(arg1); // true
+     *         console.log(arg2); // 2
+     *         console.log(arg3); // { test: 'foo' }
+     *         console.log(arg4); // 14
+     *         console.log(options); // the options added when adding the listener
+     *         console.log(e); // the event object with information about the event
+     *     });
+     *
+     * And then we can fire off the event.
+     * 
+     *     this.fireEvent('myevent', true, 2, { test: 'foo' }, 14);
+     *
      * An event may be set to bubble up an Observable parent hierarchy by calling {@link #enableBubble}.
      *
      * @param {String} eventName The name of the event to fire.

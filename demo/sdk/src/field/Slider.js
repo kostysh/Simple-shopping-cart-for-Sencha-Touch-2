@@ -116,10 +116,24 @@ Ext.define('Ext.field.Slider', {
          * @cfg
          * @inheritdoc
          */
-        tabIndex: -1
+        tabIndex: -1,
+
+        /**
+         * Will make this field read only, meaning it cannot be changed with used interaction.
+         * @cfg {Boolean} readOnly
+         * @accessor
+         */
+        readOnly: false
     },
 
     proxyConfig: {
+
+        /**
+         * @cfg {Number} increment See {@link Ext.slider.Slider#increment}
+         * @accessor
+         */
+        increment : 1,
+
         /**
          * @cfg {Number/Number[]} value See {@link Ext.slider.Slider#value}
          * @accessor
@@ -136,13 +150,7 @@ Ext.define('Ext.field.Slider', {
          * @cfg {Number} maxValue See {@link Ext.slider.Slider#maxValue}
          * @accessor
          */
-        maxValue: 100,
-
-        /**
-         * @cfg {Number} increment See {@link Ext.slider.Slider#increment}
-         * @accessor
-         */
-        increment: 1
+        maxValue: 100
     },
 
     /**
@@ -165,6 +173,7 @@ Ext.define('Ext.field.Slider', {
 
         this.getComponent().on({
             scope: this,
+
             change: 'onSliderChange',
             dragstart: 'onSliderDragStart',
             drag: 'onSliderDrag',
@@ -218,5 +227,17 @@ Ext.define('Ext.field.Slider', {
         this.callParent(arguments);
 
         this.getComponent().setDisabled(disabled);
+    },
+
+    updateReadOnly: function(newValue) {
+        this.getComponent().setReadOnly(newValue);
+    },
+
+    isDirty : function () {
+        if (this.getDisabled()) {
+            return false;
+        }
+
+        return this.getValue() !== this.originalValue;
     }
 });

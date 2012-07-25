@@ -204,6 +204,27 @@ Ext.define('Ext.field.Input', {
         maxRows: null,
 
         /**
+         * @cfg {String} pattern The value for the HTML5 pattern attribute.
+         * You can use this to change which keyboard layout will be used.
+         *
+         *     Ext.define('Ux.field.Pattern', {
+         *         extend : 'Ext.field.Text',
+         *         xtype  : 'patternfield',
+         *         
+         *         config : {
+         *             component : {
+         *                 pattern : '[0-9]*'
+         *             }
+         *         }
+         *     });
+         *
+         * Even though it extends Ext.field.Text, it will display the number keyboard.
+         *
+         * @accessor
+         */
+        pattern: null,
+
+        /**
          * @cfg {Boolean} disabled True to disable the field (defaults to false).
          * <p>Be aware that conformant with the <a href="http://www.w3.org/TR/html401/interact/forms.html#h-17.12.1">HTML specification</a>,
          * disabled Fields will not be {@link Ext.form.Panel#method-submit submitted}.</p>
@@ -286,6 +307,10 @@ Ext.define('Ext.field.Input', {
      */
     updateUseMask: function(newUseMask) {
         this.mask[newUseMask ? 'show' : 'hide']();
+    },
+
+    updatePattern : function (pattern) {
+        this.updateFieldAttribute('pattern', pattern);
     },
 
     /**

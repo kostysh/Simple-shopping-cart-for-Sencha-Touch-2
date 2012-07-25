@@ -106,7 +106,7 @@ Ext.define('Ext.device.push.Abstract', {
 
         return {
             success: function(token) {
-                me.onSuccess(token, config.sucess, config.scope || me);
+                me.onSuccess(token, config.success, config.scope || me);
             },
             failure: function(error) {
                 me.onFailure(error, config.failure, config.scope || me);

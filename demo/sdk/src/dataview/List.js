@@ -369,11 +369,11 @@ Ext.define('Ext.dataview.List', {
     },
 
     onStoreClear: function() {
-        this.callParent();
         if (this.header) {
             this.header.destroy();
         }
-        this.doRefreshHeaders();
+        this.container.doRemoveHeaders();
+        this.callParent();
     },
 
     // @private
@@ -433,6 +433,10 @@ Ext.define('Ext.dataview.List', {
                         offset: headerItem.offsetTop
                     });
                 }
+            }
+
+            if (!this.getPinHeaders()) {
+              return;
             }
 
             headerInfo.closest = this.getClosestGroups();

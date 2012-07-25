@@ -126,6 +126,13 @@ Ext.define('Ext.field.Select', {
         usePicker: 'auto',
 
         /**
+         * @cfg {Boolean} autoSelect
+         * True to auto select the first value in the {@link #store} or {@link #options} when they are changed. Only happens when
+         * the {@link #value} is set to `null`.
+         */
+        autoSelect: true,
+
+        /**
          * @cfg {Object} defaultPhonePickerConfig
          * The default configuration for the picker component when you are on a phone
          */
@@ -207,7 +214,7 @@ Ext.define('Ext.field.Select', {
 
         store = this.getStore();
 
-        if ((value && !value.isModel) && store) {
+        if ((value != undefined && !value.isModel) && store) {
             index = store.find(this.getValueField(), value, null, null, null, true);
 
             if (index == -1) {
@@ -328,7 +335,7 @@ Ext.define('Ext.field.Select', {
                 name   = this.getName(),
                 value  = {};
 
-            value[name] = this.record.get(this.getValueField());
+            value[name] = this.getValue();
             picker.setValue(value);
             if (!picker.getParent()) {
                 Ext.Viewport.add(picker);
@@ -445,6 +452,12 @@ selectBox.setOptions(
         if (newStore) {
             this.onStoreDataChanged(newStore);
         }
+
+        if (this.getUsePicker() && this.picker) {
+            this.picker.down('pickerslot').setStore(newStore);
+        } else if (this.listPanel) {
+            this.listPanel.down('dataview').setStore(newStore);
+        }
     },
 
     /**
@@ -454,7 +467,7 @@ selectBox.setOptions(
         var initialConfig = this.getInitialConfig(),
             value = this.getValue();
 
-        if (Ext.isDefined(value)) {
+        if (value || value == 0) {
             this.updateValue(this.applyValue(value));
         }
 
@@ -463,7 +476,7 @@ selectBox.setOptions(
                 this.setValue(initialConfig.value);
             }
 
-            if (this.getValue() === null) {
+            if (this.getValue() === null && this.getAutoSelect()) {
                 if (store.getCount() > 0) {
                     this.setValue(store.getAt(0));
                 }

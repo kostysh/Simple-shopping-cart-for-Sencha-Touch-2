@@ -70,7 +70,7 @@
  *             {
  *                 align: 'right',
  *                 text: 'Another button'
- *             },
+ *             }
  *         ]
  *     });
  *
@@ -276,9 +276,10 @@ Ext.define('Ext.TitleBar', {
         //set the min/max width of the left button
         var leftBox = this.leftBox,
             leftButton = leftBox.down('button'),
+            singleButton = leftBox.getItems().getCount() == 1,
             leftBoxWidth, maxButtonWidth;
 
-        if (leftButton) {
+        if (leftButton && singleButton) {
             if (leftButton.getWidth() == null) {
                 leftButton.renderElement.setWidth('auto');
             }

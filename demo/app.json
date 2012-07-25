@@ -61,7 +61,7 @@
             "update": "full"
         },
         {
-            "path": "src/component/cart/resources/css/cart.css",
+            "path": "src/ux/Cart/resources/css/cart.css",
             "update": "full"
         }
     ],

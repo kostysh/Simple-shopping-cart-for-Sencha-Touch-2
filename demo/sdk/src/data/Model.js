@@ -343,7 +343,14 @@ Ext.define('Ext.data.Model', {
         /**
          * @method getIsErased Returns true if the record has been erased on the server.
          */
-        isErased: false
+        isErased: false,
+
+        /**
+         * @cfg {Boolean} useCache
+         * Change this to false if you want to ensure that new instances are created for each id. For example,
+         * this is needed when adding the same treenodes to multiple trees.
+         */
+        useCache: true
     },
 
     staticConfigs: [
@@ -452,7 +459,7 @@ Ext.define('Ext.data.Model', {
 
             callback = function(operation) {
                 if (operation.wasSuccessful()) {
-                    record = operation.getRecords()[0];
+                    record = operation.getRecords()[0] || null;
                     Ext.callback(config.success, scope, [record, operation]);
                 } else {
                     Ext.callback(config.failure, scope, [record, operation]);
@@ -486,6 +493,7 @@ Ext.define('Ext.data.Model', {
     constructor: function(data, id, raw, convertedData) {
         var me = this,
             cached = null,
+            useCache = this.getUseCache(),
             idProperty = this.getIdProperty();
 
         /**
@@ -515,7 +523,7 @@ Ext.define('Ext.data.Model', {
         }
 
         id = data[idProperty];
-        if (id || id === 0) {
+        if (useCache && (id || id === 0)) {
             cached = Ext.data.Model.cache[Ext.data.Model.generateCacheId(this, id)];
             if (cached) {
                 return cached.mergeData(convertedData || data || {});
@@ -542,7 +550,9 @@ Ext.define('Ext.data.Model', {
             me.id = me.getIdentifier().generate(me);
         }
 
-        Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)] = me;
+        if (useCache) {
+            Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)] = me;
+        }
 
         if (this.init && typeof this.init == 'function') {
             this.init();
@@ -560,18 +570,18 @@ Ext.define('Ext.data.Model', {
         var me = this,
             fields = me.getFields().items,
             ln = fields.length,
+            modified = me.modified,
             data = me.data,
             i, field, fieldName, value, convert;
 
         for (i = 0; i < ln; i++) {
             field = fields[i];
-            fieldName = field.getName();
-            convert = field.getConvert();
+            fieldName = field._name;
             value = rawData[fieldName];
 
-            if (value !== undefined && !me.isModified(fieldName)) {
-                if (convert) {
-                    value = convert.call(field, value, me);
+            if (value !== undefined && !modified.hasOwnProperty(fieldName)) {
+                if (field._convert) {
+                    value = field._convert(value, me);
                 }
 
                 data[fieldName] = value;
@@ -590,10 +600,11 @@ Ext.define('Ext.data.Model', {
      * @return {Ext.data.Model} this This Record
      */
     setData: function(rawData) {
-        var fields = this.fields.items,
+        var me = this,
+            fields = me.fields.items,
             ln = fields.length,
             isArray = Ext.isArray(rawData),
-            data = this._data = this.data = {},
+            data = me._data = me.data = {},
             i, field, name, value, convert, id;
 
         if (!rawData) {
@@ -602,8 +613,8 @@ Ext.define('Ext.data.Model', {
 
         for (i = 0; i < ln; i++) {
             field = fields[i];
-            name = field.getName();
-            convert = field.getConvert();
+            name = field._name;
+            convert = field._convert;
 
             if (isArray) {
                 value = rawData[i];
@@ -611,18 +622,18 @@ Ext.define('Ext.data.Model', {
             else {
                 value = rawData[name];
                 if (typeof value == 'undefined') {
-                    value = field.getDefaultValue();
+                    value = field._defaultValue;
                 }
             }
 
             if (convert) {
-                value = convert.call(field, value, this);
+                value = field._convert(value, me);
             }
 
             data[name] = value;
         }
 
-        id = this.getId();
+        id = me.getId();
         if (this.associations.length && (id || id === 0)) {
             this.handleInlineAssociationData(rawData);
         }
@@ -672,8 +683,10 @@ Ext.define('Ext.data.Model', {
         // exist on the record instance.
         this.internalId = id;
 
-        delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(this, currentId)];
-        Ext.data.Model.cache[Ext.data.Model.generateCacheId(this)] = this;
+        if (this.getUseCache()) {
+            delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(this, currentId)];
+            Ext.data.Model.cache[Ext.data.Model.generateCacheId(this)] = this;
+        }
     },
 
     /**
@@ -1374,7 +1387,9 @@ Ext.define('Ext.data.Model', {
     destroy: function() {
         var me = this;
         me.notifyStores('afterErase', me);
-        delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)];
+        if (me.getUseCache()) {
+            delete Ext.data.Model.cache[Ext.data.Model.generateCacheId(me)];
+        }
         me.raw = me.stores = me.modified = null;
         me.callParent(arguments);
     },

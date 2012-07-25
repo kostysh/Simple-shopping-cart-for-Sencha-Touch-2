@@ -1,5 +1,6 @@
-Ext.define("{name}.view.Main", {
+Ext.define('{name}.view.Main', {
     extend: 'Ext.tab.Panel',
+    xtype: 'main',
     requires: [
         'Ext.TitleBar',
         'Ext.Video'

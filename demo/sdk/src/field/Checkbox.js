@@ -68,6 +68,14 @@ Ext.define('Ext.field.Checkbox', {
     isCheckbox: true,
 
     /**
+     * @event change
+     * Fires just before the field blurs if the field value has changed
+     * @param {Ext.field.Checkbox} this This field
+     * @param {Boolean} newValue The new value
+     * @param {Boolean} oldValue The original value
+     */
+
+    /**
      * @event check
      * Fires when the checkbox is checked.
      * @param {Ext.field.Checkbox} this This checkbox
@@ -230,6 +238,8 @@ Ext.define('Ext.field.Checkbox', {
             } else {
                 me.fireEvent('uncheck', me, e);
             }
+
+            me.fireEvent('change', me, newChecked, oldChecked);
         }
     },
 

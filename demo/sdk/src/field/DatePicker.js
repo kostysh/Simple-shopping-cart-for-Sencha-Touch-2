@@ -310,16 +310,20 @@ Ext.define('Ext.field.DatePicker', {
         me.fireEvent('change', me, me.getValue());
     },
 
+    onChange: Ext.emptyFn,
+
     /**
      * Destroys the picker when it is hidden, if
      * {@link Ext.field.DatePicker#destroyPickerOnHide destroyPickerOnHide} is set to true
      * @private
      */
     onPickerHide: function() {
-        var picker = this.getPicker();
-        if (this.getDestroyPickerOnHide() && picker) {
+        var me     = this,
+            picker = me.getPicker();
+
+        if (me.getDestroyPickerOnHide() && picker) {
             picker.destroy();
-            this._picker = true;
+            me._picker = me.getInitialConfig().picker || true;
         }
     },
 

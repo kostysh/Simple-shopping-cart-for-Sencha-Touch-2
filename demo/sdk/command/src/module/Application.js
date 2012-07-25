@@ -187,6 +187,7 @@ Ext.define('Command.module.Application', {
             preprocessor = Ext.require('Command.Preprocessor').getInstance(),
             nodeFs = require('fs'),
             temp = Date.now(),
+            remoteAssets = [],
             indexHtml, assets, file, destinationFile, files,
             appJs, assetsCount, processedAssetsCount,
             packagerConfig, packagerJson, processIndex, ignoreFn;
@@ -245,9 +246,15 @@ Ext.define('Command.module.Application', {
         });
 
         assets.forEach(function(asset) {
-            file = asset.path;
-            fs.copyFile(path.join(src, file), path.join(destination, file));
-            this.info("Copied " + file);
+            if (asset.remote) {
+                asset.bundle = false;
+                asset.update = false;
+                remoteAssets.push(asset);
+            } else {
+                file = asset.path;
+                fs.copyFile(path.join(src, file), path.join(destination, file));
+                this.info("Copied " + file);
+            }
         }, this);
 
         ignore = ignore.map(function(regex){
@@ -291,12 +298,29 @@ Ext.define('Command.module.Application', {
             }
 
             fs.minify(path.join(sdk, 'microloader', (environment == 'production' ? 'production' : 'testing')+'.js'), null, 'closurecompiler', function(content) {
-                indexHtml = indexHtml.replace(/<script id="microloader"([^<]+)<\/script>/,
+                var remotes = [
                     '<script type="text/javascript">' +
-                        content + ';Ext.blink(' + (environment == 'production' ? JSON.stringify({
-                            id: config.id
+                        content + ';Ext.blink(' +
+                        (environment == 'production' ? JSON.stringify({
+                            id : config.id
                         }) : appJson) + ')' +
-                    '</script>');
+                    '</script>'
+                ];
+
+                remoteAssets.forEach(function (asset) {
+                    var uri = asset.path;
+
+                    if (asset.type === 'js') {
+                        remotes.push('<script type="text/javascript" src="' + uri + '"></script>');
+                    } else if (asset.type === 'css') {
+                        remotes.push('<link rel="stylesheet" type="text/css" href="' + uri + '" />');
+                    }
+                });
+
+                indexHtml = indexHtml.replace(
+                    /<script id="microloader"([^<]+)<\/script>/,
+                    remotes.join('')
+                );
 
                 fs.write(path.join(destination, indexHtmlPath), indexHtml);
                 this.info("Embedded microloader into " + indexHtmlPath);
@@ -330,91 +354,99 @@ Ext.define('Command.module.Application', {
                 destinationFile = path.join(destination, file);
 
                 if (asset.type == 'js') {
-                    fs.write(destinationFile, preprocessor.process(destinationFile));
-                    this.info("Processed " + file);
+                    if (!asset.remote) {
+                        fs.write(destinationFile, preprocessor.process(destinationFile));
+                        this.info("Processed local file " + file);
+                    } else {
+                        this.info("Precessed remote file " + file)
+                    }
                 }
 
                 if (environment == 'testing') {
                     return;
                 }
 
-                this.info("Minifying " + file);
+                if (asset.remote) {
+                    ++processedAssetsCount;
+                } else {
+                    this.info("Minifying " + file);
 
-                fs.minify(destinationFile, destinationFile, null, function(destinationFile, file, asset) {
-                    this.info("Minified " + file);
+                    fs.minify(destinationFile, destinationFile, null, function(destinationFile, file, asset) {
+                        this.info("Minified " + file);
 
-                    if (environment == 'production') {
-                        var version = fs.checksum(destinationFile);
-                        asset.version = version;
+                        if (environment == 'production') {
+                            var version = fs.checksum(destinationFile);
+                            asset.version = version;
 
-                        fs.prependFile(destinationFile, '/*' + version + '*/');
-                        fs.copyFile(destinationFile, path.join(archive, file, version));
+                            fs.prependFile(destinationFile, '/*' + version + '*/');
+                            fs.copyFile(destinationFile, path.join(archive, file, version));
 
-                        if (asset.update === 'delta') {
-                            nodeFs.readdirSync(path.join(archive, file)).forEach(function(archivedVersion) {
-                                if (archivedVersion === version) {
-                                    return;
-                                }
-
-                                var deltaFile = path.join(destination, 'deltas', file, archivedVersion + '.json');
-
-                                fs.write(deltaFile, '');
-                                fs.delta(
-                                    path.join(archive, file, archivedVersion), destinationFile, deltaFile,
-                                    function() {
-                                        this.info("Generated delta for: '" + file + "' from hash: '" +
-                                            archivedVersion + "' to hash: '" + version + "'");
-                                    }.bind(this)
-                                );
-
-                            }, this);
-                        }
-                    }
-
-                    if (++processedAssetsCount == assetsCount) {
-                        processIndex(function() {
-                            if (environment == 'production' && appCache) {
-                                appCache.cache = appCache.cache.map(function(cache) {
-                                    var checksum = '';
-
-                                    if (!/^(\/|(.*):\/\/)/.test(cache)) {
-                                        this.info("Generating checksum for appCache item: " + cache);
-                                        checksum = fs.checksum(path.join(destination, cache));
+                            if (asset.update === 'delta') {
+                                nodeFs.readdirSync(path.join(archive, file)).forEach(function(archivedVersion) {
+                                    if (archivedVersion === version) {
+                                        return;
                                     }
 
-                                    return {
-                                        uri: cache,
-                                        checksum: checksum
-                                    }
+                                    var deltaFile = path.join(destination, 'deltas', file, archivedVersion + '.json');
+
+                                    fs.write(deltaFile, '');
+                                    fs.delta(
+                                        path.join(archive, file, archivedVersion), destinationFile, deltaFile,
+                                        function() {
+                                            this.info("Generated delta for: '" + file + "' from hash: '" +
+                                                archivedVersion + "' to hash: '" + version + "'");
+                                        }.bind(this)
+                                    );
+
                                 }, this);
-
-                                fs.write(path.join(destination, 'cache.manifest'), this.getTemplate('cache.manifest').apply(appCache));
-                                this.info("Generated cache.manifest");
                             }
+                        }
 
-                            if (nativePackaging) {
-                                packagerJson = fs.read(path.join(src, 'packager.json'));
-                                packagerConfig = Ext.JSON.decode(packagerJson);
+                        if (++processedAssetsCount == assetsCount) {
+                            processIndex(function() {
+                                if (environment == 'production' && appCache) {
+                                    appCache.cache = appCache.cache.map(function(cache) {
+                                        var checksum = '';
 
-                                if (packagerConfig.platform.match(/iOS/)) {
-                                    fs.copyDirectory(path.join(src, 'resources', 'icons'), destination, ignoreFn);
-                                    fs.copyDirectory(path.join(src, 'resources', 'loading'), destination, ignoreFn);
+                                        if (!/^(\/|(.*):\/\/)/.test(cache)) {
+                                            this.info("Generating checksum for appCache item: " + cache);
+                                            checksum = fs.checksum(path.join(destination, cache));
+                                        }
+
+                                        return {
+                                            uri: cache,
+                                            checksum: checksum
+                                        }
+                                    }, this);
+
+                                    fs.write(path.join(destination, 'cache.manifest'), this.getTemplate('cache.manifest').apply(appCache));
+                                    this.info("Generated cache.manifest");
                                 }
 
-                                packagerConfig.inputPath = destination;
-                                packagerConfig.outputPath = path.resolve(config.buildPaths.native);
-                                fs.mkdir(packagerConfig.outputPath);
-                                fs.writeJson(path.join(src, 'packager.temp.json'), packagerConfig);
+                                if (nativePackaging) {
+                                    packagerJson = fs.read(path.join(src, 'packager.json'));
+                                    packagerConfig = Ext.JSON.decode(packagerJson);
 
-                                this.info("Packaging your application as a native app...");
+                                    if (packagerConfig.platform.match(/iOS/)) {
+                                        fs.copyDirectory(path.join(src, 'resources', 'icons'), destination, ignoreFn);
+                                        fs.copyDirectory(path.join(src, 'resources', 'loading'), destination, ignoreFn);
+                                    }
 
-                                this.getModule('package').run('packager.temp.json', function() {
-                                    nodeFs.unlinkSync(path.join(src, 'packager.temp.json'));
-                                });
-                            }
-                        }.bind(this));
-                    }
-                }.bind(this, destinationFile, file, asset));
+                                    packagerConfig.inputPath = destination;
+                                    packagerConfig.outputPath = path.resolve(config.buildPaths.native);
+                                    fs.mkdir(packagerConfig.outputPath);
+                                    fs.writeJson(path.join(src, 'packager.temp.json'), packagerConfig);
+
+                                    this.info("Packaging your application as a native app...");
+
+                                    this.getModule('package').run('packager.temp.json', function() {
+                                        nodeFs.unlinkSync(path.join(src, 'packager.temp.json'));
+                                    });
+                                }
+                            }.bind(this));
+                        }
+                    }.bind(this, destinationFile, file, asset));
+                }
             }, this);
 
             if (environment == 'testing') {

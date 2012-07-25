@@ -254,7 +254,7 @@ Ext.define('Ext.data.proxy.Proxy', {
     batch: function(options, /* deprecated */listeners) {
         var me = this,
             useBatch = me.getBatchActions(),
-            model = this.getModel(),
+            model = me.getModel(),
             batch,
             records;
 
@@ -263,9 +263,7 @@ Ext.define('Ext.data.proxy.Proxy', {
             // so convert to the single options argument syntax
             options = {
                 operations: options,
-                batch: {
-                    listeners: listeners
-                }
+                listeners: listeners
             };
 
             // <debug warn>
@@ -273,24 +271,18 @@ Ext.define('Ext.data.proxy.Proxy', {
             // </debug>
         }
 
-        if (options.batch) {
-             if (options.batch.isBatch) {
-                 options.batch.setProxy(me);
-             } else {
-                 options.batch.proxy = me;
-             }
+        if (options.batch && options.batch.isBatch) {
+            batch = options.batch;
         } else {
-             options.batch = {
-                 proxy: me,
-                 listeners: options.listeners || {}
-             };
+            batch = new Ext.data.Batch(options.batch || {});
         }
 
-        if (!batch) {
-            batch = new Ext.data.Batch(options.batch);
-        }
+        batch.setProxy(me);
 
         batch.on('complete', Ext.bind(me.onBatchComplete, me, [options], 0));
+        if (options.listeners) {
+            batch.on(options.listeners);
+        }
 
         Ext.each(me.getBatchOrder().split(','), function(action) {
              records = options.operations[action];

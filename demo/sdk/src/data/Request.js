@@ -90,6 +90,22 @@ Ext.define('Ext.data.Request', {
          */
         withCredentials: null,
 
+        /**
+         * @cfg {String} username
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the username.
+         * @accessor
+         */
+        username: null,
+
+        /**
+         * @cfg {String} password
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the password.
+         * @accessor
+         */
+        password: null,
+
         callback: null,
         scope: null,
         timeout: 30000,

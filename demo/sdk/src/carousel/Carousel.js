@@ -67,7 +67,7 @@
  * ## Further Reading
  *
  * For more information about Carousels see the [Carousel guide](#!/guide/carousel).
- * 
+ *
  * @aside guide carousel
  */
 Ext.define('Ext.carousel.Carousel', {
@@ -80,7 +80,8 @@ Ext.define('Ext.carousel.Carousel', {
     requires: [
         'Ext.fx.easing.EaseOut',
         'Ext.carousel.Item',
-        'Ext.carousel.Indicator'
+        'Ext.carousel.Indicator',
+        'Ext.util.TranslatableGroup'
     ],
 
     config: {
@@ -148,12 +149,6 @@ Ext.define('Ext.carousel.Carousel', {
     activeIndex: -1,
 
     beforeInitialize: function() {
-        this.animationListeners = {
-            animationframe: 'onActiveItemAnimationFrame',
-            animationend: 'onActiveItemAnimationEnd',
-            scope: this
-        };
-
         this.element.on({
             dragstart: 'onDragStart',
             drag: 'onDrag',
@@ -203,10 +198,8 @@ Ext.define('Ext.carousel.Carousel', {
                 item.fireEvent('renderedchange', this, item, true);
             }
         }
-    },
 
-    getActiveCarouselItem: function() {
-        return this.orderedCarouselItems[this.getBufferSize()];
+        this.getTranslatable().setActiveIndex(size);
     },
 
     setRendered: function(rendered) {
@@ -340,6 +333,18 @@ Ext.define('Ext.carousel.Carousel', {
         return (index >= activeIndex - bufferSize && index <= activeIndex + bufferSize);
     },
 
+    getTranslatable: function() {
+        var translatable = this.translatable;
+
+        if (!translatable) {
+            this.translatable = translatable = new Ext.util.TranslatableGroup;
+            translatable.setItems(this.orderedCarouselItems);
+            translatable.on('animationend', 'onAnimationEnd', this);
+        }
+
+        return translatable;
+    },
+
     onDragStart: function(e) {
         var direction = this.getDirection(),
             absDeltaX = e.absDeltaX,
@@ -359,9 +364,7 @@ Ext.define('Ext.carousel.Carousel', {
             }
         }
 
-        if (this.isAnimating) {
-            this.getActiveCarouselItem().getTranslatable().stopAnimation();
-        }
+        this.getTranslatable().stopAnimation();
 
         this.dragStartOffset = this.offset;
         this.dragDirection = 0;
@@ -476,101 +479,34 @@ Ext.define('Ext.carousel.Carousel', {
     },
 
     setOffset: function(offset) {
-        var orderedCarouselItems = this.orderedCarouselItems,
-            bufferSize = this.getBufferSize(),
-            activeItem = orderedCarouselItems[bufferSize],
-            itemLength = this.itemLength,
-            axis = this.currentAxis,
-            nextItem, previousItem, distance, i;
-
         this.offset = offset;
 
-        offset += this.itemOffset;
-
-        if (activeItem) {
-            activeItem.translateAxis(axis, offset);
-
-            for (i = 1,distance = 0; i <= bufferSize; i++) {
-                previousItem = orderedCarouselItems[bufferSize - i];
-
-                if (previousItem) {
-                    distance += itemLength;
-                    previousItem.translateAxis(axis, offset - distance);
-                }
-            }
-
-            for (i = 1,distance = 0; i <= bufferSize; i++) {
-                nextItem = orderedCarouselItems[bufferSize + i];
-
-                if (nextItem) {
-                    distance += itemLength;
-                    nextItem.translateAxis(axis, offset + distance);
-                }
-            }
-        }
+        this.getTranslatable().translateAxis(this.currentAxis, offset + this.itemOffset);
 
         return this;
     },
 
     setOffsetAnimated: function(offset) {
-        var activeCarouselItem = this.orderedCarouselItems[this.getBufferSize()],
-            indicator = this.getIndicator();
+        var indicator = this.getIndicator();
 
         if (indicator) {
             indicator.setActiveIndex(this.getActiveIndex() - this.animationDirection);
         }
 
         this.offset = offset;
-        offset += this.itemOffset;
 
-        if (activeCarouselItem) {
-            this.isAnimating = true;
-
-            activeCarouselItem.getTranslatable().on(this.animationListeners);
-            activeCarouselItem.translateAxis(this.currentAxis, offset, this.getAnimation());
-        }
+        this.getTranslatable().translateAxis(this.currentAxis, offset + this.itemOffset, this.getAnimation());
 
         return this;
     },
 
-    onActiveItemAnimationFrame: function(translatable) {
-        var orderedCarouselItems = this.orderedCarouselItems,
-            bufferSize = this.getBufferSize(),
-            itemLength = this.itemLength,
-            axis = this.currentAxis,
-            offset = translatable[axis],
-            previousItem, nextItem, i, distance;
-
-        for (i = 1,distance = 0; i <= bufferSize; i++) {
-            previousItem = orderedCarouselItems[bufferSize - i];
-
-            if (previousItem) {
-                distance += itemLength;
-                previousItem.translateAxis(axis, offset - distance);
-            }
-        }
-
-        for (i = 1,distance = 0; i <= bufferSize; i++) {
-            nextItem = orderedCarouselItems[bufferSize + i];
-
-            if (nextItem) {
-                distance += itemLength;
-                nextItem.translateAxis(axis, offset + distance);
-            }
-        }
-    },
-
-    onActiveItemAnimationEnd: function(translatable) {
+    onAnimationEnd: function(translatable) {
         var currentActiveIndex = this.getActiveIndex(),
             animationDirection = this.animationDirection,
             axis = this.currentAxis,
             currentOffset = translatable[axis],
             itemLength = this.itemLength,
             offset;
-
-        this.isAnimating = false;
-
-        translatable.un(this.animationListeners);
 
         if (animationDirection === -1) {
             offset = itemLength + currentOffset;
@@ -595,6 +531,10 @@ Ext.define('Ext.carousel.Carousel', {
     refreshSizing: function() {
         var element = this.element,
             itemLength = this.getItemLength(),
+            translatableItemLength = {
+                x: 0,
+                y: 0
+            },
             itemOffset, containerSize;
 
         if (this.getDirection() === 'horizontal') {
@@ -616,6 +556,8 @@ Ext.define('Ext.carousel.Carousel', {
 
         this.itemLength = itemLength;
         this.itemOffset = itemOffset;
+        translatableItemLength[this.currentAxis] = itemLength;
+        this.getTranslatable().setItemLength(translatableItemLength);
     },
 
     refreshOffset: function() {
@@ -784,10 +726,7 @@ Ext.define('Ext.carousel.Carousel', {
      * @return {Ext.carousel.Carousel} this
      */
     next: function() {
-        if (this.isAnimating) {
-            this.getActiveCarouselItem().getTranslatable().stopAnimation();
-            this.setOffset(0);
-        }
+        this.setOffset(0);
 
         if (this.activeIndex === this.getMaxItemIndex()) {
             return this;
@@ -803,10 +742,7 @@ Ext.define('Ext.carousel.Carousel', {
      * @return {Ext.carousel.Carousel} this
      */
     previous: function() {
-        if (this.isAnimating) {
-            this.getActiveCarouselItem().getTranslatable().stopAnimation();
-            this.setOffset(0);
-        }
+        this.setOffset(0);
 
         if (this.activeIndex === 0) {
             return this;
@@ -841,7 +777,7 @@ Ext.define('Ext.carousel.Carousel', {
 
         this.carouselItems.length = 0;
 
-        Ext.destroy(carouselItems, this.getIndicator());
+        Ext.destroy(carouselItems, this.getIndicator(), this.translatable);
 
         this.callParent();
         delete this.carouselItems;

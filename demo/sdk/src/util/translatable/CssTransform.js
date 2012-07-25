@@ -4,22 +4,10 @@
  * CSS Transform implementation
  */
 Ext.define('Ext.util.translatable.CssTransform', {
-    extend: 'Ext.util.translatable.Abstract',
+    extend: 'Ext.util.translatable.Dom',
 
-    doTranslate: function(x, y) {
-        var domStyle = this.getElement().dom.style;
-
-        if (typeof x != 'number') {
-            x = this.x;
-        }
-
-        if (typeof y != 'number') {
-            y = this.y;
-        }
-
-        domStyle.webkitTransform = 'translate3d(' + x + 'px, ' + y + 'px, 0px)';
-
-        return this.callParent(arguments);
+    doTranslate: function() {
+        this.getElement().dom.style.webkitTransform = 'matrix(1,0,0,1,' + this.x + ', ' + this.y + ')';
     },
 
     destroy: function() {

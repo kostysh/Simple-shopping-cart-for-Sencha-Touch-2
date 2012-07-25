@@ -1,33 +1,19 @@
 /*
-This file is part of Sencha Touch 2.0
+This file is part of Sencha Touch 2.1
 
 Copyright (c) 2011-2012 Sencha Inc
 
 Contact:  http://www.sencha.com/contact
 
-Commercial Usage
-Licensees holding valid commercial licenses may use this file in accordance with the Commercial
-Software License Agreement provided with the Software or, alternatively, in accordance with the
-terms contained in a written agreement between you and Sencha.
+Pre-release code in the Sencha repository is intended for development purposes only and will
+not always be stable.
 
-If you are unsure which license is appropriate for your use, please contact the sales department
-at http://www.sencha.com/contact.
+Use of pre-release code is permitted with your application at your own risk under standard
+Sencha license terms. Public redistribution is prohibited.
 
-Build date: 2012-06-04 15:34:28 (d81f71da2d56f5f71419dc892fbc85685098c6b7)
-*/
-/*
+For early licensing, please contact us at licensing@sencha.com
 
-This file is part of Sencha Touch 2
-
-Copyright (c) 2012 Sencha Inc
-
-Contact:  http://www.sencha.com/contact
-
-Commercial Usage
-Licensees holding valid commercial licenses may use this file in accordance with the Commercial Software License Agreement provided with the Software or, alternatively, in accordance with the terms contained in a written agreement between you and Sencha.
-
-If you are unsure which license is appropriate for your use, please contact the sales department at http://www.sencha.com/contact.
-
+Build date: 2012-07-19 13:01:47 (627aa862163d0f582763d8c35783611847b6e52e)
 */
 /**
  * @class Ext
@@ -69,7 +55,7 @@ If you are unsure which license is appropriate for your use, please contact the 
      * {@link Ext.Object#merge} instead.
      * @param {Object} object The receiver of the properties
      * @param {Object} config The source of the properties
-     * @param {Object} defaults A different object that will also be applied for default values
+     * @param {Object} [defaults] A different object that will also be applied for default values
      * @return {Object} returns obj
      */
     Ext.apply = function(object, config, defaults) {
@@ -2452,7 +2438,9 @@ var ExtObject = Ext.Object = {
      * Returns a new object with the given object as the prototype chain.
      * @param {Object} object The prototype chain for the new object.
      */
-    chain: function (object) {
+    chain: ('create' in Object) ? function(object){
+        return Object.create(object);
+    } : function (object) {
         TemplateClass.prototype = object;
         var result = new TemplateClass();
         TemplateClass.prototype = null;
@@ -2464,7 +2452,7 @@ var ExtObject = Ext.Object = {
      * query strings. For example:
      *
      * Non-recursive:
-     * 
+     *
      *     var objects = Ext.Object.toQueryObjects('hobbies', ['reading', 'cooking', 'swimming']);
      *
      *     // objects then equals:
@@ -2952,8 +2940,8 @@ var ExtObject = Ext.Object = {
      * @private
      */
     classify: function(object) {
-        var prototype = object,
-            objectProperties = [],
+        var objectProperties = [],
+            arrayProperties = [],
             propertyClassesMap = {},
             objectClass = function() {
                 var i = 0,
@@ -2964,21 +2952,35 @@ var ExtObject = Ext.Object = {
                     property = objectProperties[i];
                     this[property] = new propertyClassesMap[property];
                 }
+
+                ln = arrayProperties.length;
+
+                for (i = 0; i < ln; i++) {
+                    property = arrayProperties[i];
+                    this[property] = object[property].slice();
+                }
             },
-            key, value;
+            key, value, constructor;
 
         for (key in object) {
             if (object.hasOwnProperty(key)) {
                 value = object[key];
 
-                if (value && value.constructor === Object) {
-                    objectProperties.push(key);
-                    propertyClassesMap[key] = ExtObject.classify(value);
+                if (value) {
+                    constructor = value.constructor;
+
+                    if (constructor === Object) {
+                        objectProperties.push(key);
+                        propertyClassesMap[key] = ExtObject.classify(value);
+                    }
+                    else if (constructor === Array) {
+                        arrayProperties.push(key);
+                    }
                 }
             }
         }
 
-        objectClass.prototype = prototype;
+        objectClass.prototype = object;
 
         return objectClass;
     },
@@ -8214,21 +8216,6 @@ var noArgs = [],
    Ext.Function.pass, Ext.Array.from, Ext.Array.erase, Ext.Array.include);
 
 
-
-/*
-
-This file is part of Sencha Touch 2
-
-Copyright (c) 2012 Sencha Inc
-
-Contact:  http://www.sencha.com/contact
-
-Commercial Usage
-Licensees holding valid commercial licenses may use this file in accordance with the Commercial Software License Agreement provided with the Software or, alternatively, in accordance with the terms contained in a written agreement between you and Sencha.
-
-If you are unsure which license is appropriate for your use, please contact the sales department at http://www.sencha.com/contact.
-
-*/
 /**
  * @class Ext.EventManager
  *
@@ -8392,7 +8379,7 @@ Ext.EventManager.un = Ext.EventManager.removeListener;
  *
  * [getting_started]: #!/guide/getting_started
  */
-Ext.setVersion('touch', '2.0.1.1');
+Ext.setVersion('touch', '2.1.0-beta1');
 
 Ext.apply(Ext, {
     /**
@@ -8674,6 +8661,13 @@ function(el){
      */
     isSetup: false,
 
+    /**
+     * This indicate the start timestamp of current cycle. 
+     * It is only reliable during dom-event-initiated cycles and 
+     * {@link Ext.draw.fx.Frame} initiated cycles.
+     */
+    frameStartTime: +new Date(),
+    
     /**
      * @private
      */
@@ -9860,7 +9854,7 @@ Ext.define('Ext.env.Browser', {
      * Note that only {@link Ext.Version#getMajor major component}  and {@link Ext.Version#getShortVersion simplified}
      * value of the version are available via direct property checking.
      *
-     * Supported values are: IE, Firefox, Safari, Chrome, Opera, WebKit, Gecko, Presto, Trident and Other
+     * Supported values are: IE, Firefox, Safari, Chrome, Opera, WebKit, Gecko, Presto, Trident, WebView and Other
      *
      * @param {String} value The OS name to check
      * @return {Boolean}
@@ -10255,6 +10249,9 @@ Ext.define('Ext.env.OS', {
     else {
         if (!osEnv.is.Android && !osEnv.is.iOS && /Windows|Linux|MacOS/.test(osName)) {
             deviceType = 'Desktop';
+
+            // always set it to false when you are on a desktop
+            Ext.browser.is.WebView = false;
         }
         else if (osEnv.is.iPad || osEnv.is.Android3 || (osEnv.is.Android4 && userAgent.search(/mobile/i) == -1)) {
             deviceType = 'Tablet';
@@ -10673,9 +10670,12 @@ Ext.define('Ext.env.Feature', {
  * @class Ext.DomQuery
  * @alternateClassName Ext.dom.Query
  *
- * Provides functionality to select elements on the page based on a CSS selector. All selectors, attribute filters and
- * pseudos below can be combined infinitely in any order. For example "div.foo:nth-child(odd)[@foo=bar].bar:first"
- * would be a perfectly valid selector.
+ * Provides functionality to select elements on the page based on a CSS selector. Delegates to
+ * document.querySelectorAll. More information can be found at
+ * [http://www.w3.org/TR/css3-selectors/](http://www.w3.org/TR/css3-selectors/)
+ *
+ * All selectors, attribute filters and pseudos below can be combined infinitely in any order. For example
+ * `div.foo:nth-child(odd)[@foo=bar].bar:first` would be a perfectly valid selector.
  *
  * ## Element Selectors:
  *
@@ -10712,8 +10712,6 @@ Ext.define('Ext.env.Feature', {
  * * E:nth(n) the nth E in the resultset (1 based)
  * * E:odd shortcut for :nth-child(odd)
  * * E:even shortcut for :nth-child(even)
- * * E:contains(foo) E's innerHTML contains the substring "foo"
- * * E:nodeValue(foo) E contains a textNode with a nodeValue that equals "foo"
  * * E:not(S) an E element that does not match simple selector S
  * * E:has(S) an E element that has a descendent that matches simple selector S
  * * E:next(S) an E element whose next sibling matches simple selector S
@@ -11401,8 +11399,11 @@ Ext.define('Ext.dom.Element', {
             if (!tag) {
                 tag = 'div';
             }
-
-            element = document.createElement(tag);
+            if (attributes.namespace) {
+                element = document.createElementNS(attributes.namespace, tag);
+            } else {
+                element = document.createElement(tag);
+            }
             elementStyle = element.style;
 
             for (name in attributes) {
@@ -12712,21 +12713,11 @@ Ext.dom.Element.override({
      */
 
     getXY: function() {
-        var webkitConvert = window.webkitConvertPointFromNodeToPage;
+        var rect = this.dom.getBoundingClientRect(),
+            round = Math.round;
 
-        if (webkitConvert) {
-            return function() {
-                var point = webkitConvert(this.dom, new WebKitPoint(0, 0));
-                return [point.x, point.y];
-            }
-        }
-        else return function() {
-            var rect = this.dom.getBoundingClientRect(),
-                round = Math.round;
-
-            return [round(rect.left + window.pageXOffset), round(rect.top + window.pageYOffset)];
-        }
-    }(),
+        return [round(rect.left + window.pageXOffset), round(rect.top + window.pageYOffset)];
+    },
 
     /**
      * Returns the offsets of this element from the passed element. Both element must be part of the DOM tree
@@ -14417,21 +14408,6 @@ Ext.define('Ext.dom.CompositeElementLite', {
 
 
 
-/*
-
-This file is part of Sencha Touch 2
-
-Copyright (c) 2012 Sencha Inc
-
-Contact:  http://www.sencha.com/contact
-
-Commercial Usage
-Licensees holding valid commercial licenses may use this file in accordance with the Commercial Software License Agreement provided with the Software or, alternatively, in accordance with the terms contained in a written agreement between you and Sencha.
-
-If you are unsure which license is appropriate for your use, please contact the sales department at http://www.sencha.com/contact.
-
-*/
-
 this.ExtBootstrapData = {
     "nameToAliasesMap":{
         "Ext.AbstractComponent":[],
@@ -14504,6 +14480,126 @@ this.ExtBootstrapData = {
         ],
         "Ext.carousel.Infinite":[],
         "Ext.carousel.Item":[],
+        "Ext.chart.AbstractChart":[],
+        "Ext.chart.Callout":[],
+        "Ext.chart.CartesianChart":["widget.chart",
+            "Ext.chart.Chart"
+        ],
+        "Ext.chart.Legend":[],
+        "Ext.chart.Panel":["widget.chartpanel"
+        ],
+        "Ext.chart.PolarChart":["widget.polar"
+        ],
+        "Ext.chart.Shape":[],
+        "Ext.chart.Spark":[],
+        "Ext.chart.Toolbar":[],
+        "Ext.chart.axis.Abstract":["widget.axis"
+        ],
+        "Ext.chart.axis.Axis":[],
+        "Ext.chart.axis.Category":["axis.category"
+        ],
+        "Ext.chart.axis.Gauge":[],
+        "Ext.chart.axis.Numeric":["axis.numeric"
+        ],
+        "Ext.chart.axis.Radial":[],
+        "Ext.chart.axis.Time":["axis.time"
+        ],
+        "Ext.chart.axis.layout.CombineDuplicate":["axisLayout.combineDuplicate"
+        ],
+        "Ext.chart.axis.layout.Continuous":["axisLayout.continuous"
+        ],
+        "Ext.chart.axis.layout.Discrete":["axisLayout.discrete"
+        ],
+        "Ext.chart.axis.layout.Layout":[],
+        "Ext.chart.axis.segmenter.Names":["segmenter.names"
+        ],
+        "Ext.chart.axis.segmenter.Numeric":["segmenter.numeric"
+        ],
+        "Ext.chart.axis.segmenter.Segmenter":[],
+        "Ext.chart.axis.segmenter.Time":["segmenter.time"
+        ],
+        "Ext.chart.axis.sprite.Axis":[],
+        "Ext.chart.interactions.Abstract":["widget.interaction"
+        ],
+        "Ext.chart.interactions.DelayedSync":[],
+        "Ext.chart.interactions.HandleStyle":[],
+        "Ext.chart.interactions.ItemCompare":["interaction.itemcompare"
+        ],
+        "Ext.chart.interactions.ItemHighlight":["interaction.itemhighlight"
+        ],
+        "Ext.chart.interactions.ItemInfo":["interaction.iteminfo"
+        ],
+        "Ext.chart.interactions.PanZoom":["interaction.panzoom"
+        ],
+        "Ext.chart.interactions.PieGrouping":["interaction.piegrouping"
+        ],
+        "Ext.chart.interactions.Reset":["interaction.reset"
+        ],
+        "Ext.chart.interactions.Rotate":["interaction.rotate"
+        ],
+        "Ext.chart.interactions.SliceStyle":[],
+        "Ext.chart.interactions.ToggleStacked":["interaction.togglestacked"
+        ],
+        "Ext.chart.legend.View":[],
+        "Ext.chart.series.AbstractRadial":[],
+        "Ext.chart.series.AbstractSpaceFilling":[],
+        "Ext.chart.series.Area":["series.area"
+        ],
+        "Ext.chart.series.Bar":["series.bar"
+        ],
+        "Ext.chart.series.CandleStick":["series.candlestick"
+        ],
+        "Ext.chart.series.Cartesian":[],
+        "Ext.chart.series.Column":[],
+        "Ext.chart.series.Gauge":[],
+        "Ext.chart.series.Icicle":[],
+        "Ext.chart.series.ItemEvents":[],
+        "Ext.chart.series.Line":["series.line"
+        ],
+        "Ext.chart.series.Pie":["series.pie"
+        ],
+        "Ext.chart.series.Polar":[],
+        "Ext.chart.series.Radar":["series.radar"
+        ],
+        "Ext.chart.series.Scatter":["series.scatter"
+        ],
+        "Ext.chart.series.Series":[],
+        "Ext.chart.series.Sunburst":[],
+        "Ext.chart.series.Treemap":[],
+        "Ext.chart.series.Wordmap":[],
+        "Ext.chart.series.sprite.AbstractRadial":[],
+        "Ext.chart.series.sprite.Aggregative":[],
+        "Ext.chart.series.sprite.Area":["sprite.areaSeries"
+        ],
+        "Ext.chart.series.sprite.Bar":["sprite.barSeries"
+        ],
+        "Ext.chart.series.sprite.CandleStick":["sprite.candlestickSeries"
+        ],
+        "Ext.chart.series.sprite.Cartesian":[],
+        "Ext.chart.series.sprite.Line":["sprite.lineSeries"
+        ],
+        "Ext.chart.series.sprite.Markers":[],
+        "Ext.chart.series.sprite.Pie":["sprite.pie"
+        ],
+        "Ext.chart.series.sprite.Polar":[],
+        "Ext.chart.series.sprite.Radar":["sprite.radar"
+        ],
+        "Ext.chart.series.sprite.Scatter":["sprite.scatterSeries"
+        ],
+        "Ext.chart.series.sprite.StackedCartesian":[],
+        "Ext.chart.series.sprite.Stream":["sprite.stripe"
+        ],
+        "Ext.chart.theme.Base":[],
+        "Ext.chart.theme.CalloutStyle":[],
+        "Ext.chart.theme.EvenStyle":[],
+        "Ext.chart.theme.GridStyle":[],
+        "Ext.chart.theme.HighlightStyle":[],
+        "Ext.chart.theme.LabelStyle":[],
+        "Ext.chart.theme.MarkerStyle":[],
+        "Ext.chart.theme.OddStyle":[],
+        "Ext.chart.theme.Style":[],
+        "Ext.chart.theme.Theme":[],
+        "Ext.chart.theme.TitleStyle":[],
         "Ext.data.ArrayStore":["store.array"
         ],
         "Ext.data.Batch":[],
@@ -14566,6 +14662,8 @@ this.ExtBootstrapData = {
         ],
         "Ext.data.proxy.SessionStorage":["proxy.sessionstorage"
         ],
+        "Ext.data.proxy.SQL":["proxy.sql"
+        ],
         "Ext.data.proxy.WebStorage":[],
         "Ext.data.reader.Array":["reader.array"
         ],
@@ -14592,6 +14690,7 @@ this.ExtBootstrapData = {
         "Ext.dataview.component.Container":[],
         "Ext.dataview.component.DataItem":["widget.dataitem"
         ],
+        "Ext.dataview.component.Infinite":[],
         "Ext.dataview.element.Container":[],
         "Ext.dataview.element.List":[],
         "Ext.direct.Event":["direct.event"
@@ -14618,6 +14717,61 @@ this.ExtBootstrapData = {
         ],
         "Ext.dom.Helper":[],
         "Ext.dom.Query":[],
+        "Ext.draw.Bezier":[],
+        "Ext.draw.Color":[],
+        "Ext.draw.Component":["widget.draw"
+        ],
+        "Ext.draw.Draw":[],
+        "Ext.draw.Group":[],
+        "Ext.draw.LimitedCache":[],
+        "Ext.draw.Matrix":[],
+        "Ext.draw.RMQ":[],
+        "Ext.draw.Sampler":[],
+        "Ext.draw.SegmentTree":[],
+        "Ext.draw.Surface":["widget.surface"
+        ],
+        "Ext.draw.TextMeasurer":[],
+        "Ext.draw.engine.Canvas":[],
+        "Ext.draw.engine.ImageExporter":[],
+        "Ext.draw.engine.Svg":[],
+        "Ext.draw.engine.SvgExporter":[],
+        "Ext.draw.fx.Abstract":[],
+        "Ext.draw.fx.Frame":[],
+        "Ext.draw.fx.Parser":[],
+        "Ext.draw.fx.Queue":[],
+        "Ext.draw.fx.TimingFunctions":[],
+        "Ext.draw.gradient.Gradient":[],
+        "Ext.draw.gradient.Linear":[],
+        "Ext.draw.gradient.Radial":[],
+        "Ext.draw.modifier.Animation":["modifier.animation"
+        ],
+        "Ext.draw.modifier.Highlight":["modifier.highlight"
+        ],
+        "Ext.draw.modifier.Modifier":[],
+        "Ext.draw.modifier.Target":["modifier.target"
+        ],
+        "Ext.draw.path.Path":[],
+        "Ext.draw.sprite.AttributeDefinition":[],
+        "Ext.draw.sprite.AttributeParser":[],
+        "Ext.draw.sprite.Circle":["sprite.circle"
+        ],
+        "Ext.draw.sprite.Composite":["sprite.composite"
+        ],
+        "Ext.draw.sprite.Ellipse":["sprite.ellipse"
+        ],
+        "Ext.draw.sprite.Image":["sprite.image"
+        ],
+        "Ext.draw.sprite.Instancing":["sprite.instancing"
+        ],
+        "Ext.draw.sprite.Path":["sprite.path"
+        ],
+        "Ext.draw.sprite.PieSlice":["sprite.pieslice"
+        ],
+        "Ext.draw.sprite.Rect":["sprite.rect"
+        ],
+        "Ext.draw.sprite.Sprite":[],
+        "Ext.draw.sprite.Text":["sprite.text"
+        ],
         "Ext.env.Browser":[],
         "Ext.env.Feature":[],
         "Ext.env.OS":[],
@@ -14763,6 +14917,7 @@ this.ExtBootstrapData = {
         "Ext.log.writer.DocumentTitle":[],
         "Ext.log.writer.Remote":[],
         "Ext.log.writer.Writer":[],
+        "Ext.mixin.Bindable":[],
         "Ext.mixin.Filterable":[],
         "Ext.mixin.Identifiable":[],
         "Ext.mixin.Mixin":[],
@@ -14825,8 +14980,10 @@ this.ExtBootstrapData = {
         "Ext.util.Sorter":[],
         "Ext.util.TapRepeater":[],
         "Ext.util.Translatable":[],
+        "Ext.util.TranslatableGroup":[],
         "Ext.util.translatable.Abstract":[],
         "Ext.util.translatable.CssTransform":[],
+        "Ext.util.translatable.Dom":[],
         "Ext.util.translatable.ScrollPosition":[],
         "Ext.viewport.Android":[],
         "Ext.viewport.Default":["widget.viewport"
@@ -14974,7 +15131,6 @@ this.ExtBootstrapData = {
         this.ExtBootstrapData = null;
     }
 })();
-
 
 
 

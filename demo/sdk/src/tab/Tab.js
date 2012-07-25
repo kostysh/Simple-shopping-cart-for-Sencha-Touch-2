@@ -70,6 +70,18 @@ Ext.define('Ext.tab.Tab', {
         }
     ],
 
+    updateIconCls : function(newCls, oldCls) {
+        this.callParent([newCls, oldCls]);
+
+        if (oldCls) {
+            this.removeCls('x-tab-icon');
+        }
+
+        if (newCls) {
+            this.addCls('x-tab-icon');
+        }
+    },
+
     /**
      * @event activate
      * Fires when a tab is activated

@@ -10,8 +10,6 @@ Ext.define('Ext.util.translatable.Abstract', {
     requires: ['Ext.fx.easing.Linear'],
 
     config: {
-        element: null,
-
         easing: null,
 
         easingX: null,
@@ -45,38 +43,22 @@ Ext.define('Ext.util.translatable.Abstract', {
      * @param {Number} y The current translation on the y axis
      */
 
-    constructor: function(config) {
-        var element;
+    x: 0,
 
+    y: 0,
+
+    activeEasingX: null,
+
+    activeEasingY: null,
+
+    isAnimating: false,
+
+    isTranslatable: true,
+
+    constructor: function(config) {
         this.doAnimationFrame = Ext.Function.bind(this.doAnimationFrame, this);
 
-        this.x = 0;
-
-        this.y = 0;
-
-        this.activeEasingX = null;
-
-        this.activeEasingY = null;
-
-        this.initialConfig = config;
-
-        if (config && config.element) {
-            element = config.element;
-            this.setElement(element);
-        }
-    },
-
-    applyElement: function(element) {
-        if (!element) {
-            return;
-        }
-
-        return Ext.get(element);
-    },
-
-    updateElement: function(element) {
-        this.initConfig(this.initialConfig);
-        this.refresh();
+        this.initConfig(config);
     },
 
     factoryEasing: function(easing) {
@@ -105,7 +87,17 @@ Ext.define('Ext.util.translatable.Abstract', {
         this.animationInterval = 1000 / fps;
     },
 
-    doTranslate: function(x, y) {
+    doTranslate: Ext.emptyFn,
+
+    translate: function(x, y, animation) {
+        if (animation) {
+            return this.translateAnimated(x, y, animation);
+        }
+
+        if (this.isAnimating) {
+            this.stopAnimation();
+        }
+
         if (typeof x == 'number') {
             this.x = x;
         }
@@ -114,24 +106,20 @@ Ext.define('Ext.util.translatable.Abstract', {
             this.y = y;
         }
 
-        return this;
+        return this.doTranslate(x, y);
     },
 
-    translate: function(x, y, animation) {
-        if (!this.getElement().dom) {
-            return;
-        }
-        if (Ext.isObject(x)) {
-            throw new Error();
-        }
+    translateAxis: function(axis, value, animation) {
+        var x, y;
 
-        this.stopAnimation();
-
-        if (animation) {
-            return this.translateAnimated(x, y, animation);
+        if (axis == 'x') {
+            x = value;
+        }
+        else {
+            y = value;
         }
 
-        return this.doTranslate(x, y);
+        return this.translate(x, y, animation);
     },
 
     animate: function(easingX, easingY) {
@@ -147,18 +135,18 @@ Ext.define('Ext.util.translatable.Abstract', {
     },
 
     translateAnimated: function(x, y, animation) {
-        if (Ext.isObject(x)) {
-            throw new Error();
-        }
-
         if (!Ext.isObject(animation)) {
             animation = {};
         }
 
+        if (this.isAnimating) {
+            this.stopAnimation();
+        }
+
         var now = Ext.Date.now(),
             easing = animation.easing,
-            easingX = (typeof x == 'number') ? (animation.easingX || this.getEasingX() || easing || true) : null,
-            easingY = (typeof y == 'number') ? (animation.easingY || this.getEasingY() || easing || true) : null;
+            easingX = (typeof x == 'number') ? (animation.easingX || easing || this.getEasingX() || true) : null,
+            easingY = (typeof y == 'number') ? (animation.easingY || easing || this.getEasingY() || true) : null;
 
         if (easingX) {
             easingX = this.factoryEasing(easingX);
@@ -188,10 +176,9 @@ Ext.define('Ext.util.translatable.Abstract', {
     doAnimationFrame: function() {
         var easingX = this.activeEasingX,
             easingY = this.activeEasingY,
-            element = this.getElement(),
             x, y;
 
-        if (!this.isAnimating || !element.dom) {
+        if (!this.isAnimating) {
             return;
         }
 
@@ -244,5 +231,13 @@ Ext.define('Ext.util.translatable.Abstract', {
 
     refresh: function() {
         this.translate(this.x, this.y);
+    },
+
+    destroy: function() {
+        if (this.isAnimating) {
+            this.stopAnimation();
+        }
+
+        this.callParent(arguments);
     }
 });

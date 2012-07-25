@@ -46,6 +46,7 @@ Ext.define('Ext.viewport.Default', {
          * - Orientation change performance is drastically reduced when this is enabled, on all devices.
          * - On some devices (mostly Android) this can sometimes cause issues when the default browser zoom setting is changed.
          * - When wrapping your phone in a native shell, you may get a blank screen.
+         * - When bookmarked to the homescreen (iOS), you may get a blank screen.
          *
          * @accessor
          */
@@ -161,11 +162,14 @@ Ext.define('Ext.viewport.Default', {
 
         this.callParent([config]);
 
-        if (this.supportsOrientation()) {
-            this.addWindowListener('orientationchange', bind(this.onOrientationChange, this));
-        }
-        else {
-            this.addWindowListener('resize', bind(this.onResize, this));
+        // Android is handled separately
+        if (!Ext.os.is.Android) {
+            if (this.supportsOrientation()) {
+                this.addWindowListener('orientationchange', bind(this.onOrientationChange, this));
+            }
+            else {
+                this.addWindowListener('resize', bind(this.onResize, this));
+            }
         }
 
         document.addEventListener('focus', bind(this.onElementFocus, this), true);
@@ -326,8 +330,8 @@ Ext.define('Ext.viewport.Default', {
 
             this.updateSize();
 
-            firingArguments[1] = this.windowWidth;
-            firingArguments[2] = this.windowHeight;
+            firingArguments[2] = this.windowWidth;
+            firingArguments[3] = this.windowHeight;
 
             controller.resume();
         }, this, { single: true });
@@ -391,7 +395,9 @@ Ext.define('Ext.viewport.Default', {
             currentOrientation = this.getOrientation(),
             newOrientation = this.determineOrientation();
 
-        if ((oldWidth !== width || oldHeight !== height) && currentOrientation !== newOrientation) {
+        // Determine orientation change via resize. BOTH width AND height much change, otherwise
+        // this is a keyboard popping up.
+        if ((oldWidth !== width && oldHeight !== height) && currentOrientation !== newOrientation) {
             this.fireOrientationChangeEvent(newOrientation, currentOrientation);
         }
     },

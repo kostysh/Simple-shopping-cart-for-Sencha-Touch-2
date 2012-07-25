@@ -244,6 +244,11 @@ $form-scrollable-fields: '.x-field-slider, .x-field-toggle';
         @if $include-border-radius { @include border-top-radius($form-fieldset-radius); }
       }
     }
+
+    // Needed so that the arrow icon in selectfield's only fit to the size of the field. TOUCH-2672
+    .x-component-outer {
+      position: relative;
+    }
   }
 
   .x-label-align-bottom {
@@ -598,7 +603,10 @@ $form-scrollable-fields: '.x-field-slider, .x-field-toggle';
     margin: 1em ( $form-spacing + .1em ) .3em;
     color: $form-dark;
     font-weight: bold;
-    white-space: nowrap;
+
+    .x-innerhtml {
+      @include ellipsis;
+    }
   }
 
   .x-form-fieldset-instructions {

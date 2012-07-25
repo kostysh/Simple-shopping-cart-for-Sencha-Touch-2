@@ -85,7 +85,7 @@ Ext.define('Ext.data.writer.Writer', {
     },
 
     writeDate: function(field, date) {
-        var dateFormat = field.dateFormat || 'timestamp';
+        var dateFormat = field.getDateFormat() || 'timestamp';
         switch (dateFormat) {
             case 'timestamp':
                 return date.getTime()/1000;

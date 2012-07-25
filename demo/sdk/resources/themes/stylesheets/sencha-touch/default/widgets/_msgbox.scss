@@ -7,11 +7,17 @@
   .x-msgbox {
     min-width: 15em;
     max-width: 20em;
+    max-height: 90%;
     padding: 0.8em;
     margin: .5em;
     -webkit-box-shadow: rgba(#000, .4) 0 .1em .5em;
     @if $include-border-radius { @include border-radius($panel-border-radius); }
     border: .15em solid $base-color;
+
+    // to hide content that is too large (vertically)
+    .x-docking-vertical {
+      overflow: hidden;
+    }
 
     //icons
     .x-icon {
@@ -42,7 +48,7 @@
     }
 
     .x-body {
-      background:transparent !important;
+      background: transparent !important;
     }
 
     .x-toolbar {

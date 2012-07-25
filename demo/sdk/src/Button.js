@@ -1,12 +1,13 @@
 /**
- * {@link Ext.Button} is a simple class to display a button in Sencha Touch. There are various
- * different styles of {@link Ext.Button} you can create by using the {@link #icon},
+ * A simple class to display a button in Sencha Touch.
+ * 
+ * There are various different styles of Button you can create by using the {@link #icon},
  * {@link #iconCls}, {@link #iconAlign}, {@link #iconMask}, {@link #ui}, and {@link #text}
  * configurations.
  *
  * ## Simple Button
  *
- * Here is an {@link Ext.Button} is it's simplist form:
+ * Here is a Button in it's simplest form:
  *
  *     @example miniphone
  *     var button = Ext.create('Ext.Button', {
@@ -16,8 +17,7 @@
  *
  * ## Icons
  *
- * You can also create a {@link Ext.Button} with just an icon using the {@link #iconCls}
- * configuration:
+ * You can also create a Button with just an icon using the {@link #iconCls} configuration:
  *
  *     @example miniphone
  *     var button = Ext.create('Ext.Button', {
@@ -115,10 +115,10 @@
  *
  * You can also use the {@link #sencha-button-ui sencha-button-ui} CSS Mixin to create your own UIs.
  *
- * ## Examples
+ * ## Example
  *
  * This example shows a bunch of icons on the screen in two toolbars. When you click on the center
- * button, it switches the iconCls on every button on the page.
+ * button, it switches the {@link #iconCls} on every button on the page.
  *
  *     @example preview
  *     Ext.createWidget('container', {

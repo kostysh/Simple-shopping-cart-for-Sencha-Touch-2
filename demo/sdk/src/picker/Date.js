@@ -21,6 +21,15 @@ You may want to adjust the {@link #yearFrom} and {@link #yearTo} properties:
     Ext.Viewport.add(datePicker);
     datePicker.show();
 
+
+    @example miniphone preview
+    var datePicker = Ext.create('Ext.picker.Date', {
+        yearFrom: 2015,
+        yearTo  : 2000
+    });
+    Ext.Viewport.add(datePicker);
+    datePicker.show();
+
 You can set the value of the {@link Ext.picker.Date} to the current date using `new Date()`:
 
     @example miniphone preview
@@ -56,14 +65,16 @@ Ext.define('Ext.picker.Date', {
     config: {
         /**
          * @cfg {Number} yearFrom
-         * The start year for the date picker.
+         * The start year for the date picker. If {@link #yearFrom} is greater than
+         * {@link #yearTo} then the order of years will be reversed.
          * @accessor
          */
         yearFrom: 1980,
 
         /**
          * @cfg {Number} yearTo
-         * The last year for the date picker.
+         * The last year for the date picker. If {@link #yearFrom} is greater than
+         * {@link #yearTo} then the order of years will be reversed.
          * @default the current year (new Date().getFullYear())
          * @accessor
          */
@@ -257,50 +268,53 @@ Ext.define('Ext.picker.Date', {
      */
     createSlots: function() {
         var me        = this,
-            slotOrder = this.getSlotOrder(),
+            slotOrder = me.getSlotOrder(),
             yearsFrom = me.getYearFrom(),
             yearsTo   = me.getYearTo(),
             years     = [],
             days      = [],
             months    = [],
-            ln, tmp, i,
-            daysInMonth;
+            reverse   = yearsFrom > yearsTo,
+            ln, i, daysInMonth;
 
-        // swap values if user mixes them up.
-        if (yearsFrom > yearsTo) {
-            tmp = yearsFrom;
-            yearsFrom = yearsTo;
-            yearsTo = tmp;
-        }
-
-        for (i = yearsFrom; i <= yearsTo; i++) {
+        while (yearsFrom) {
             years.push({
-                text: i,
-                value: i
+                text  : yearsFrom,
+                value : yearsFrom
             });
+
+            if (yearsFrom === yearsTo) {
+                break;
+            }
+
+            if (reverse) {
+                yearsFrom--;
+            } else {
+                yearsFrom++;
+            }
         }
 
-        daysInMonth = this.getDaysInMonth(1, new Date().getFullYear());
+        daysInMonth = me.getDaysInMonth(1, new Date().getFullYear());
 
         for (i = 0; i < daysInMonth; i++) {
             days.push({
-                text: i + 1,
-                value: i + 1
+                text  : i + 1,
+                value : i + 1
             });
         }
 
         for (i = 0, ln = Ext.Date.monthNames.length; i < ln; i++) {
             months.push({
-                text: Ext.Date.monthNames[i],
-                value: i + 1
+                text  : Ext.Date.monthNames[i],
+                value : i + 1
             });
         }
 
         var slots = [];
 
-        slotOrder.forEach(function(item) {
-            slots.push(this.createSlot(item, days, months, years));
-        }, this);
+        slotOrder.forEach(function (item) {
+            slots.push(me.createSlot(item, days, months, years));
+        });
 
         me.setSlots(slots);
     },
@@ -364,13 +378,13 @@ Ext.define('Ext.picker.Date', {
             return;
         }
 
+        slot.setData(days);
+
         // Now we have the correct amounnt of days for the day slot, lets update it
         var store = slot.getStore(),
             viewItems = slot.getViewItems(),
             valueField = slot.getValueField(),
             index, item;
-
-        slot.setData(days);
 
         index = store.find(valueField, value.getDate());
         if (index == -1) {

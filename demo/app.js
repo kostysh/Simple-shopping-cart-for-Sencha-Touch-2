@@ -1,5 +1,5 @@
 Ext.Loader.setPath({
-    'Cs': 'src'
+    'Ext.ux': 'src/ux'
 });
 
 Ext.application({
@@ -11,7 +11,7 @@ Ext.application({
 
     requires: [
         'Ext.MessageBox',
-        'Cs.component.cart.src.Cart'
+        'Ext.ux.Cart.src.Cart'
     ],
 
     views: [
@@ -28,8 +28,9 @@ Ext.application({
     ],
     
     controllers: [
-        'Cs.component.cart.controller.Indicator',
-        'Cs.component.cart.controller.Panel'
+        'Ext.ux.Cart.controller.Indicator',
+        'Ext.ux.Cart.controller.Panel',
+        'Ext.ux.Cart.controller.Archive'
     ],
 
     icon: {
@@ -56,13 +57,13 @@ Ext.application({
         Ext.fly('appLoadingIndicator').destroy();
 
         // Initialize shopping cart products store
-        Cs.Cart.setProductsStore('Categories');
+        Cart.setProductsStore('Categories');
 
         // Setup currency
-        Cs.Cart.setCurrency('USD');
+        Cart.setCurrency('USD');
 
         // Setup cart submit callback
-        Cs.Cart.setCallback(function(encData) {
+        Cart.setCallback(function(encData) {
 			
             /**
              * You can use cart data as you want
@@ -88,6 +89,7 @@ Ext.application({
             "This application has just successfully been updated to the latest version. Reload now?",
             function(buttonId) {
                 if (buttonId === 'yes') {
+                    localStorage.clear();
                     window.location.reload();
                 }
             }

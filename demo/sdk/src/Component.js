@@ -204,17 +204,17 @@
  *  can easily modify the {@link Ext.Panel#html html content} of a Panel after creating it:
  *
  *     @example miniphone
- *     //we can configure the HTML when we instantiate the Component
+ *     // we can configure the HTML when we instantiate the Component
  *     var panel = Ext.create('Ext.Panel', {
  *         fullscreen: true,
  *         html: 'This is a Panel'
  *     });
  *
- *     //we can update the HTML later using the setHtml method:
+ *     // we can update the HTML later using the setHtml method:
  *     panel.setHtml('Some new HTML');
  *
- *     //we can retrieve the current HTML using the getHtml method:
- *     alert(panel.getHtml()); //alerts "Some new HTML"
+ *     // we can retrieve the current HTML using the getHtml method:
+ *     Ext.Msg.alert(panel.getHtml()); // displays "Some new HTML"
  *
  * Every config has a getter method and a setter method - these are automatically generated and always follow the same
  * pattern. For example, a config called 'html' will receive getHtml and setHtml methods, a config called defaultType
@@ -350,8 +350,44 @@ Ext.define('Ext.Component', {
         padding: null,
 
         /**
-         * @cfg {Number/String} border The border to use on this Component. Can be specified as a number (in which
-         * case all edges get the same border width) or a CSS string like '5 10 10 10'
+         * @cfg {Number/String} border The border width to use on this Component. Can be specified as a number (in which
+         * case all edges get the same border width) or a CSS string like '5 10 10 10'.
+         * 
+         * Please note that this will not add
+         * a `border-color` or `border-style` CSS property to the component; you must do that manually using either CSS or 
+         * the {@link #style} configuration.
+         * 
+         * ## Using {@link #style}:
+         * 
+         *     Ext.Viewport.add({
+         *         centered: true,
+         *         width: 100,
+         *         height: 100,
+         *         
+         *         border: 3,
+         *         style: 'border-color: blue; border-style: solid;',
+         *         ...
+         *     });
+         * 
+         * ## Using CSS:
+         * 
+         *     Ext.Viewport.add({
+         *         centered: true,
+         *         width: 100,
+         *         height: 100,
+         *         
+         *         border: 3,
+         *         cls: 'my-component',
+         *         ...
+         *     });
+         *     
+         * And your CSS file:
+         * 
+         *     .my-component {
+         *         border-color: red;
+         *         border-style: solid;
+         *     }
+         * 
          * @accessor
          */
         border: null,
@@ -616,19 +652,6 @@ Ext.define('Ext.Component', {
          * @accessor
          */
         hideAnimation: null,
-
-        /**
-         * @cfg {Mixed} renderTpl
-         * <p>An {@link Ext.XTemplate XTemplate} used to create the internal structure inside this Component's
-         * encapsulating Element.</p>
-         * <p>You do not normally need to specify this. For the base classes {@link Ext.Component}
-         * and {@link Ext.Container}, this defaults to <b><code>null</code></b> which means that they will be initially rendered
-         * with no internal structure; they render their {@link #getEl Element} empty. The more specialized ExtJS and Touch classes
-         * which use a more complex DOM structure, provide their own template definitions.</p>
-         * <p>This is intended to allow the developer to create application-specific utility Components with customized
-         * internal structure.</p>
-         * @accessor
-         */
 
         /**
          * @cfg {String} tplWriteMode The Ext.(X)Template method to use when
@@ -1765,6 +1788,8 @@ Ext.define('Ext.Component', {
     applyData: function(data) {
         if (Ext.isObject(data)) {
             return Ext.apply({}, data);
+        } else if (!data) {
+            data = {};
         }
 
         return data;

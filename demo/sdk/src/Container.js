@@ -137,13 +137,33 @@ Ext.define('Ext.Container', {
 
     eventedConfig: {
         /**
-         * @cfg {Object/Number} activeItem The item from the {@link #cfg-items} collection that will be active first. This is
+         * @cfg {Object/String/Number} activeItem The item from the {@link #cfg-items} collection that will be active first. This is
          * usually only meaningful in a {@link Ext.layout.Card card layout}, where only one item can be active at a
-         * time
+         * time. If passes a string, it will be assumed to be a {@link Ext.ComponentQuery} selector.
          * @accessor
          * @evented
          */
-        activeItem: 0
+        activeItem: 0,
+
+        /**
+         * @cfg {Boolean/String/Object} scrollable
+         * Configuration options to make this Container scrollable. Acceptable values are:
+         *
+         * * 'horizontal', 'vertical', 'both' to enabling scrolling for that direction.
+         * * true/false to explicitly enable/disable scrolling.
+         *
+         * Alternatively, you can give it an object which is then passed to the scroller instance:
+         *
+         *     scrollable: {
+         *         direction: 'vertical',
+         *         directionLock: true
+         *     }
+         *
+         * Please look at the {@link Ext.scroll.Scroller} documentation for more example on how to use this.
+         * @accessor
+         * @evented
+         */
+        scrollable: null
     },
 
     config: {
@@ -259,25 +279,6 @@ Ext.define('Ext.Container', {
          * @accessor
          */
         defaultType: null,
-
-        /**
-         * @cfg {Boolean/String/Object} scrollable
-         * Configuration options to make this Container scrollable. Acceptable values are:
-         *
-         * * 'horizontal', 'vertical', 'both' to enabling scrolling for that direction.
-         * * true/false to explicitly enable/disable scrolling.
-         *
-         * Alternatively, you can give it an object which is then passed to the scroller instance:
-         *
-         *     scrollable: {
-         *         direction: 'vertical',
-         *         directionLock: true
-         *     }
-         *
-         * Please look at the {@link Ext.scroll.Scroller} documentation for more example on how to use this.
-         * @accessor
-         */
-        scrollable: null,
 
         //@private
         useBodyElement: null,
@@ -432,19 +433,31 @@ Ext.define('Ext.Container', {
         this.setModal(null);
     },
 
-    refreshModalMask: function() {
-        var mask = this.getModal(),
-            container = this.getParent();
+    updateHideOnMaskTap : function(hide) {
+        var mask = this.getModal();
 
-        if (!this.painted) {
-            this.painted = true;
+        if (mask) {
+            mask.un('tap', 'hide', this);
+        }
+
+        if (hide && mask) {
+            mask.on('tap', 'hide', this);
+        }
+    },
+
+    refreshModalMask: function() {
+        var me        = this,
+            mask      = me.getModal(),
+            container = me.getParent();
+
+        if (!me.painted) {
+            me.painted = true;
 
             if (mask) {
-                container.insertBefore(mask, this);
-                mask.setZIndex(this.getZIndex() - 1);
-                if (this.getHideOnMaskTap()) {
-                    mask.on('tap', 'hide', this, { single: true });
-                }
+                container.insertBefore(mask, me);
+                mask.setZIndex(me.getZIndex() - 1);
+
+                me.updateHideOnMaskTap(me.getHideOnMaskTap());
             }
         }
     },
@@ -507,14 +520,23 @@ Ext.define('Ext.Container', {
 
     applyItems: function(items, collection) {
         if (items) {
-            this.getDefaultType();
-            this.getDefaults();
+            var me = this;
 
-            if (this.initialized && collection.length > 0) {
-                this.removeAll();
+            me.getDefaultType();
+            me.getDefaults();
+
+            if (me.initialized && collection.length > 0) {
+                me.removeAll();
             }
 
-            this.add(items);
+            me.add(items);
+
+            //Don't need to call setActiveItem when Container is first initialized
+            if (me.initialized) {
+                var activeItem = me.initialConfig.activeItem || me.config.activeItem || 0;
+
+                me.setActiveItem(activeItem);
+            }
         }
     },
 
@@ -800,6 +822,7 @@ Ext.define('Ext.Container', {
                 ln--;
             }
         }
+        this.setActiveItem(null);
 
         this.removingAll = false;
 
@@ -1196,21 +1219,32 @@ Ext.define('Ext.Container', {
             }
         }
         else if (activeItem) {
-            if (!activeItem.isComponent) {
-                activeItem = this.factoryItem(activeItem);
+            var item;
+
+            //ComponentQuery selector?
+            if (typeof activeItem == 'string') {
+                item = this.child(activeItem);
+
+                activeItem = {
+                    xtype : activeItem
+                };
+            }
+
+            if (!item || !item.isComponent) {
+                item = this.factoryItem(activeItem);
             }
 
             //<debug error>
-            if (!activeItem.isInnerItem()) {
+            if (!item.isInnerItem()) {
                 Ext.Logger.error("Setting activeItem to be a non-inner item");
             }
             //</debug>
 
-            if (!this.has(activeItem)) {
-                this.add(activeItem);
+            if (!this.has(item)) {
+                this.add(item);
             }
 
-            return activeItem;
+            return item;
         }
     },
 
@@ -1292,6 +1326,11 @@ Ext.define('Ext.Container', {
      */
     applyScrollable: function(config) {
         this.getScrollableBehavior().setConfig(config);
+        return config;
+    },
+
+    doSetScrollable: function() {
+        // Used for plugins when they need to reinitialize scroller listeners
     },
 
     /**

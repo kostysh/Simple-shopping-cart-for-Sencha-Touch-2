@@ -366,6 +366,9 @@ Ext.define('Ext.event.publisher.Dom', {
     onEvent: function(e) {
         var eventName = this.eventNameMap[e.type];
 
+        // Set the current frame start time to be the timestamp of the event.
+        Ext.frameStartTime = event.timeStamp;
+
         if (!eventName || this.getSubscribersCount(eventName) === 0) {
             return;
         }

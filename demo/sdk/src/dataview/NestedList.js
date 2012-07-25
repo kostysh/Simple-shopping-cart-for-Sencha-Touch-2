@@ -87,7 +87,7 @@ Ext.define('Ext.dataview.NestedList', {
     xtype : 'nestedlist',
     requires: [
         'Ext.List',
-        'Ext.Toolbar',
+        'Ext.TitleBar',
         'Ext.Button',
         'Ext.XTemplate',
         'Ext.data.StoreManager',

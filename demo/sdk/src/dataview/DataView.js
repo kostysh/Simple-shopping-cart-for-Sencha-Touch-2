@@ -433,6 +433,8 @@ Ext.define('Ext.dataview.DataView', {
 
         me.mixins.selectable.constructor.apply(me, arguments);
 
+        me.indexOffset = 0;
+
         me.callParent(arguments);
     },
 
@@ -543,7 +545,7 @@ Ext.define('Ext.dataview.DataView', {
 
     doAddPressedCls: function(record) {
         var me = this,
-        item = me.container.getViewItems()[me.getStore().indexOf(record)];
+        item = me.getViewItems()[me.getStore().indexOf(record)];
         if (Ext.isElement(item)) {
             item = Ext.get(item);
         }
@@ -659,7 +661,7 @@ Ext.define('Ext.dataview.DataView', {
     // invoked by the selection model to maintain visual UI cues
     doItemSelect: function(me, record) {
         if (me.container && !me.isDestroyed) {
-            var item = me.container.getViewItems()[me.getStore().indexOf(record)];
+            var item = me.getItemAt(me.getStore().indexOf(record));
             if (Ext.isElement(item)) {
                 item = Ext.get(item);
             }
@@ -684,7 +686,7 @@ Ext.define('Ext.dataview.DataView', {
     },
 
     doItemDeselect: function(me, record) {
-        var item = me.container.getViewItems()[me.getStore().indexOf(record)];
+        var item = me.getItemAt(me.getStore().indexOf(record));
 
         if (Ext.isElement(item)) {
             item = Ext.get(item);
@@ -747,7 +749,8 @@ Ext.define('Ext.dataview.DataView', {
             proxy, reader;
 
         if (oldStore && Ext.isObject(oldStore) && oldStore.isStore) {
-            if (oldStore.autoDestroy) {
+            me.onStoreClear();
+            if (oldStore.getAutoDestroy()) {
                 oldStore.destroy();
             }
             else {
@@ -865,6 +868,29 @@ Ext.define('Ext.dataview.DataView', {
         me.updateStore(me.getStore());
     },
 
+    /*
+        Returns an item at the specified index
+        @param index Index of the item
+        @return {Ext.dom.Element/Ext.dataview.component.DataItem} item Item at the specified index
+     */
+    getItemAt: function(index) {
+        return this.getViewItems()[index - this.indexOffset];
+    },
+
+    /*
+        Returns an index for the specified item
+        @param index Index of the item
+        @return {Number} index Index for the specified item
+     */
+    getItemIndex: function(item) {
+        var index = this.getViewItems().indexOf(item);
+        return (index === -1) ? index : this.indexOffset + index;
+    },
+
+    /*
+        Returns an array of the current items in the DataView
+        @return {Ext.dom.Element[]/Ext.dataview.component.DataItem[]} items Array of Items
+     */
     getViewItems: function() {
         return this.container.getViewItems();
     },
@@ -873,7 +899,7 @@ Ext.define('Ext.dataview.DataView', {
         var container = me.container,
             store = me.getStore(),
             records = store.getRange(),
-            items = container.getViewItems(),
+            items = me.getViewItems(),
             recordsLn = records.length,
             itemsLn = items.length,
             deltaLn = recordsLn - itemsLn,
@@ -894,7 +920,7 @@ Ext.define('Ext.dataview.DataView', {
         if (deltaLn < 0) {
             container.moveItemsToCache(itemsLn + deltaLn, itemsLn - 1);
             // Items can changed, we need to refresh our references
-            items = container.getViewItems();
+            items = me.getViewItems();
             itemsLn = items.length;
         }
         // Not enough items, create new ones
@@ -921,10 +947,18 @@ Ext.define('Ext.dataview.DataView', {
         }
     },
 
+    destroy: function() {
+        var store = this.getStore();
+        if (store.getAutoDestroy()) {
+            store.destroy();
+        }
+        this.callParent(arguments);
+    },
+
     onStoreClear: function() {
         var me = this,
             container = me.container,
-            items = container.getViewItems();
+            items = me.getViewItems();
 
         container.moveItemsToCache(0, items.length - 1);
         this.showEmptyText();
@@ -963,7 +997,7 @@ Ext.define('Ext.dataview.DataView', {
         }
         else {
             // Bypassing setter because sometimes we pass the same record (different data)
-            container.updateListItem(record, container.getViewItems()[newIndex]);
+            container.updateListItem(record, me.getViewItems()[newIndex]);
         }
     }
     //<deprecated product=touch since=2.0>

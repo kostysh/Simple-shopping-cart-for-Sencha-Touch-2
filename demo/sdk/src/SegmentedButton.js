@@ -64,7 +64,13 @@ Ext.define('Ext.SegmentedButton', {
          * Defaults to true when `allowMultiple` is true.
          * @accessor
          */
-        allowDepress: null,
+        allowDepress: false,
+
+        /**
+         * @cfg {Boolean} allowToggle Allow child buttons to be pressed when tapped on. False to allow tapping but not toggling of the buttons.
+         * @accessor
+         */
+        allowToggle: true,
 
         /**
          * @cfg {Array} pressedButtons
@@ -117,8 +123,8 @@ Ext.define('Ext.SegmentedButton', {
         });
     },
 
-    updateAllowMultiple: function() {
-        if (!this.initialized && !this.getInitialConfig().hasOwnProperty('allowDepress')) {
+    updateAllowMultiple: function(allowMultiple) {
+        if (!this.initialized && !this.getInitialConfig().hasOwnProperty('allowDepress') && allowMultiple) {
             this.setAllowDepress(true);
         }
     },
@@ -155,6 +161,9 @@ Ext.define('Ext.SegmentedButton', {
      * @private
      */
     onButtonRelease: function(button) {
+        if (!this.getAllowToggle()) {
+            return;
+        }
         var me             = this,
             pressedButtons = me.getPressedButtons() || [],
             buttons        = [],
@@ -176,11 +185,17 @@ Ext.define('Ext.SegmentedButton', {
             }
 
             me.setPressedButtons(buttons);
-
-            Ext.defer(function() {
-                me.fireEvent('toggle', me, button, me.isPressed(button));
-            }, 50);
         }
+    },
+
+    onItemAdd: function() {
+        this.callParent(arguments);
+        this.updateFirstAndLastCls(this.getItems());
+    },
+
+    onItemRemove: function() {
+        this.callParent(arguments);
+        this.updateFirstAndLastCls(this.getItems());
     },
 
     // @private
@@ -192,13 +207,22 @@ Ext.define('Ext.SegmentedButton', {
     updateFirstAndLastCls: function(items) {
         var ln = items.length,
             basePrefix = Ext.baseCSSPrefix,
+            firstCls = basePrefix + 'first',
+            lastCls = basePrefix + 'last',
             item, i;
+
+        //remove all existing classes
+        for (i = 0; i < ln; i++) {
+            item = items.items[i];
+            item.removeCls(firstCls);
+            item.removeCls(lastCls);
+        }
 
         //add a first cls to the first non-hidden button
         for (i = 0; i < ln; i++) {
             item = items.items[i];
             if (!item.isHidden()) {
-                item.addCls(basePrefix + 'first');
+                item.addCls(firstCls);
                 break;
             }
         }
@@ -207,7 +231,7 @@ Ext.define('Ext.SegmentedButton', {
         for (i = ln - 1; i >= 0; i--) {
             item = items.items[i];
             if (!item.isHidden()) {
-                item.addCls(basePrefix + 'last');
+                item.addCls(lastCls);
                 break;
             }
         }
@@ -221,18 +245,20 @@ Ext.define('Ext.SegmentedButton', {
             array = [],
             button, ln, i;
 
-        if (Ext.isArray(newButtons)) {
-            ln = newButtons.length;
-            for (i = 0; i< ln; i++) {
-                button = me.getComponent(newButtons[i]);
+        if (me.getAllowToggle()) {
+            if (Ext.isArray(newButtons)) {
+                ln = newButtons.length;
+                for (i = 0; i< ln; i++) {
+                    button = me.getComponent(newButtons[i]);
+                    if (button && array.indexOf(button) === -1) {
+                        array.push(button);
+                    }
+                }
+            } else {
+                button = me.getComponent(newButtons);
                 if (button && array.indexOf(button) === -1) {
                     array.push(button);
                 }
-            }
-        } else {
-            button = me.getComponent(newButtons);
-            if (button && array.indexOf(button) === -1) {
-                array.push(button);
             }
         }
 
@@ -243,24 +269,51 @@ Ext.define('Ext.SegmentedButton', {
      * Updates the pressed buttons.
      * @private
      */
-    updatePressedButtons: function(newButtons) {
+    updatePressedButtons: function(newButtons, oldButtons) {
         var me    = this,
             items = me.getItems(),
             pressedCls = me.getPressedCls(),
-            item, button, ln, i;
+            events = [],
+            item, button, ln, i, e;
 
         //loop through existing items and remove the pressed cls from them
         ln = items.length;
-        for (i = 0; i < ln; i++) {
-            item = items.items[i];
-            item.removeCls([pressedCls, item.getPressedCls()]);
+        if (oldButtons && oldButtons.length) {
+            for (i = 0; i < ln; i++) {
+                item = items.items[i];
+
+                if (oldButtons.indexOf(item) != -1 && newButtons.indexOf(item) == -1) {
+                    item.removeCls([pressedCls, item.getPressedCls()]);
+                    events.push({
+                        item: item,
+                        toggle: false
+                    });
+                }
+            }
         }
 
         //loop through the new pressed buttons and add the pressed cls to them
         ln = newButtons.length;
         for (i = 0; i < ln; i++) {
             button = newButtons[i];
-            button.addCls(pressedCls);
+            if (!oldButtons || oldButtons.indexOf(button) == -1) {
+                button.addCls(pressedCls);
+                events.push({
+                    item: button,
+                    toggle: true
+                });
+            }
+        }
+
+        //loop through each of the events and fire them after a delay
+        ln = events.length;
+        if (ln) {
+            Ext.defer(function() {
+                for (i = 0; i < ln; i++) {
+                    e = events[i];
+                    me.fireEvent('toggle', me, e.item, e.toggle);
+                }
+            }, 50);
         }
     },
 

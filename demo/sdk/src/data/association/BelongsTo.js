@@ -286,6 +286,8 @@ Ext.define('Ext.data.association.BelongsTo', {
             if (Ext.isObject(options)) {
                 return this.save(options);
             }
+
+            return this;
         };
     },
 
@@ -312,6 +314,7 @@ Ext.define('Ext.data.association.BelongsTo', {
                 args;
 
             instance = model[instanceName];
+
             if (!instance) {
                 instance = Ext.data.Model.cache[Ext.data.Model.generateCacheId(associatedModel.modelName, foreignKeyId)];
                 if (instance) {
@@ -332,7 +335,7 @@ Ext.define('Ext.data.association.BelongsTo', {
                 options.success = function(rec) {
                     model[instanceName] = rec;
                     if (success) {
-                        success.call(this, arguments);
+                        success.apply(this, arguments);
                     }
                 };
 

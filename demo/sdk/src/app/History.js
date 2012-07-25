@@ -39,7 +39,8 @@ Ext.define('Ext.app.History', {
             window.addEventListener('hashchange', Ext.bind(this.detectStateChange, this));
         }
         else {
-            setInterval(Ext.bind(this.detectStateChange, this), 50);
+            this.setToken(window.location.hash.substr(1));
+            setInterval(Ext.bind(this.detectStateChange, this), 100);
         }
 
         this.initConfig(config);
@@ -70,10 +71,16 @@ Ext.define('Ext.app.History', {
     },
 
     /**
-     * @private
+     * Navigate to the previous active action. This changes the page url.
      */
     back: function() {
-        this.getActions().pop().run();
+        var actions = this.getActions(),
+            previousAction = actions[actions.length - 2],
+            app = previousAction.getController().getApplication();
+
+        actions.pop();
+
+        app.redirectTo(previousAction.getUrl());
     },
 
     /**

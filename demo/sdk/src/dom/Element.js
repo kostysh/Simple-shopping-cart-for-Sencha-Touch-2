@@ -73,8 +73,11 @@ Ext.define('Ext.dom.Element', {
             if (!tag) {
                 tag = 'div';
             }
-
-            element = document.createElement(tag);
+            if (attributes.namespace) {
+                element = document.createElementNS(attributes.namespace, tag);
+            } else {
+                element = document.createElement(tag);
+            }
             elementStyle = element.style;
 
             for (name in attributes) {

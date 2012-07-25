@@ -225,6 +225,29 @@ Ext.define('Ext.data.proxy.Ajax', {
 
     config: {
         /**
+         * @cfg {Boolean} withCredentials
+         * This configuration is sometimes necessary when using cross-origin resource sharing.
+         * @accessor
+         */
+        withCredentials: false,
+
+        /**
+         * @cfg {String} username
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the username.
+         * @accessor
+         */
+        username: null,
+
+        /**
+         * @cfg {String} password
+         * Most oData feeds require basic HTTP authentication. This configuration allows
+         * you to specify the password.
+         * @accessor
+         */
+        password: null,
+
+        /**
          * @property {Object} actionMethods
          * Mapping of action name to HTTP request method. In the basic AjaxProxy these are set to
          * 'GET' for 'read' actions and 'POST' for 'create', 'update' and 'destroy' actions.
@@ -241,14 +264,7 @@ Ext.define('Ext.data.proxy.Ajax', {
          * @cfg {Object} headers
          * Any headers to add to the Ajax request. Defaults to undefined.
          */
-        headers: {},
-
-        /**
-         * @cfg {Boolean} withCredentials
-         * This configuration is sometimes necessary when using cross-origin resource sharing.
-         * @accessor
-         */
-        withCredentials: false
+        headers: {}
     },
 
     /**
@@ -256,19 +272,23 @@ Ext.define('Ext.data.proxy.Ajax', {
      * @protected
      */
     doRequest: function(operation, callback, scope) {
-        var writer  = this.getWriter(),
-            request = this.buildRequest(operation);
+        var me = this,
+            writer  = me.getWriter(),
+            request = me.buildRequest(operation);
 
         request.setConfig({
-            headers        : this.getHeaders(),
-            timeout        : this.getTimeout(),
-            method         : this.getMethod(request),
-            callback       : this.createRequestCallback(request, operation, callback, scope),
-            scope          : this
+            headers  : me.getHeaders(),
+            timeout  : me.getTimeout(),
+            method   : me.getMethod(request),
+            callback : me.createRequestCallback(request, operation, callback, scope),
+            scope    : me,
+            proxy    : me
         });
 
-        if (operation.getWithCredentials() || this.getWithCredentials()) {
+        if (operation.getWithCredentials() || me.getWithCredentials()) {
             request.setWithCredentials(true);
+            request.setUsername(me.getUserName());
+            request.setPassword(me.getPassword());
         }
 
         // We now always have the writer prepare the request

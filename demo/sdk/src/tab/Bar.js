@@ -112,7 +112,8 @@ Ext.define('Ext.tab.Bar', {
             newTab.setActive(true);
         }
 
-        if (oldTab) {
+        //Check if the parent is present, if not it is destroyed
+        if (oldTab && oldTab.parent) {
             oldTab.setActive(false);
         }
     },

@@ -64,7 +64,7 @@ Ext.define('Ext.field.Radio', {
     },
 
     getValue: function() {
-        return (this._value) ? true : null;
+        return (this._value) ? this._value : null;
     },
 
     setValue: function(value) {

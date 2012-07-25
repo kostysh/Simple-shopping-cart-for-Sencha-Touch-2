@@ -13,6 +13,8 @@ Ext.define('Ext.scroll.indicator.Abstract', {
 
         length: null,
 
+        minLength: 6,
+
         hidden: true,
 
         ui: 'dark'
@@ -90,6 +92,10 @@ Ext.define('Ext.scroll.indicator.Abstract', {
         else {
             elementDomStyle.opacity = '';
         }
+    },
+
+    applyLength: function(length) {
+        return Math.max(this.getMinLength(), length);
     },
 
     updateLength: function(length) {

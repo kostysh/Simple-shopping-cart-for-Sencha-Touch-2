@@ -11,7 +11,7 @@ Ext.define('Ext.scroll.Indicator', {
     alternateClassName: 'Ext.util.Indicator',
 
     constructor: function(config) {
-        if (Ext.os.is.Android2 || Ext.browser.is.ChromeMobile) {
+        if (Ext.os.is.Android2 || Ext.os.is.Android3 || Ext.browser.is.ChromeMobile) {
             return new Ext.scroll.indicator.ScrollPosition(config);
         }
         else if (Ext.os.is.iOS) {

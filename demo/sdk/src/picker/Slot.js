@@ -377,7 +377,7 @@ Ext.define('Ext.picker.Slot', {
             return;
         }
 
-        if (!this.rendered || !value) {
+        if (!this.rendered) {
             //we don't want to call this until the slot has been rendered
             this._value = value;
             return;
@@ -388,7 +388,7 @@ Ext.define('Ext.picker.Slot', {
             valueField = this.getValueField(),
             index, item;
 
-        index = store.find(valueField, value);
+        index = store.findExact(valueField, value);
         if (index != -1) {
             item = Ext.get(viewItems[index]);
 
@@ -404,10 +404,6 @@ Ext.define('Ext.picker.Slot', {
      * @private
      */
     setValueAnimated: function(value) {
-        if (!value) {
-            return;
-        }
-
         if (!this.rendered) {
             //we don't want to call this until the slot has been rendered
             this._value = value;

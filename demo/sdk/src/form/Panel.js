@@ -153,7 +153,7 @@ Ext.define('Ext.form.Panel', {
 
     config: {
         /**
-         * @cfg
+         * @cfg {String} baseCls
          * @inheritdoc
          */
         baseCls: Ext.baseCSSPrefix + 'form',
@@ -201,11 +201,13 @@ Ext.define('Ext.form.Panel', {
         method: 'post',
 
         /**
-         * @cfg
+         * @cfg {Object} scrollable
          * @inheritdoc
          */
         scrollable: {
-            translationMethod: 'scrollposition'
+            translatable: {
+                translationMethod: 'scrollposition'
+            }
         }
     },
 
@@ -347,7 +349,7 @@ Ext.define('Ext.form.Panel', {
      * The failed response or result object returned by the server which performed the operation.
      *
      * @param {Object} options.scope
-     * The scope in which to call the callback functions (The this reference for the callback functions).=
+     * The scope in which to call the callback functions (The this reference for the callback functions).
      *
      * @return {Ext.data.Connection} The request object
      */
@@ -540,10 +542,12 @@ Ext.define('Ext.form.Panel', {
      *         ]
      *     }
      *
-     * @param {Boolean} enabled <tt>true</tt> to return only enabled fields
+     * @param {Boolean} enabled True to return only enabled fields
+     * @param {Boolean} all True to return all fields even if they don't have a
+     * {@link Ext.field.Field#name name} configured.
      * @return {Object} Object mapping field name to its value
      */
-    getValues: function(enabled) {
+    getValues: function(enabled, all) {
         var fields = this.getFields(),
             values = {},
             isArray = Ext.isArray,
@@ -552,6 +556,10 @@ Ext.define('Ext.form.Panel', {
         // Function which you give a field and a name, and it will add it into the values
         // object accordingly
         addValue = function(field, name) {
+            if (!all && (!name || name === 'null')) {
+                return;
+            }
+
             if (field.isCheckbox) {
                 value = field.getSubmitValue();
             } else {
@@ -577,7 +585,7 @@ Ext.define('Ext.form.Panel', {
                         }
 
                         // Check if it is an array
-                        if (isArray(bucket)) {
+                        if (isArray(value)) {
                             // Concat it into the other values
                             bucket = values[name] = bucket.concat(value);
                         } else {
@@ -623,24 +631,18 @@ Ext.define('Ext.form.Panel', {
     },
 
     /**
-     * A convenient method to enable all fields in this forms
+     * A convenient method to enable all fields in this form
      * @return {Ext.form.Panel} This form
      */
-    enable: function() {
-        this.getFieldsAsArray().forEach(function(field) {
-            field.enable();
-        });
-
-        return this;
-    },
 
     /**
-     * A convenient method to disable all fields in this forms
+     * A convenient method to disable all fields in this form
      * @return {Ext.form.Panel} This form
      */
-    disable: function() {
+
+    doSetDisabled: function(newDisabled) {
         this.getFieldsAsArray().forEach(function(field) {
-            field.disable();
+            field.setDisabled(newDisabled);
         });
 
         return this;

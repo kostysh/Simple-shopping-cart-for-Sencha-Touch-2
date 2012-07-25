@@ -47,36 +47,39 @@ Ext.define('Ext.plugin.PullRefresh', {
     requires: ['Ext.DateExtras'],
 
     config: {
-        /*
+        /**
+         * @cfg {Ext.dataview.List} list
+         * The list to which this PullRefresh plugin is connected.
+         * This will usually by set automatically when configuring the list with this plugin.
          * @accessor
          */
         list: null,
 
-        /*
+        /**
          * @cfg {String} pullRefreshText The text that will be shown while you are pulling down.
          * @accessor
          */
         pullRefreshText: 'Pull down to refresh...',
 
-        /*
+        /**
          * @cfg {String} releaseRefreshText The text that will be shown after you have pulled down enough to show the release message.
          * @accessor
          */
         releaseRefreshText: 'Release to refresh...',
 
-        /*
+        /**
          * @cfg {String} loadingText The text that will be shown while the list is refreshing.
          * @accessor
          */
         loadingText: 'Loading...',
 
-        /*
+        /**
          * @cfg {Number} snappingAnimationDuration The duration for snapping back animation after the data has been refreshed
          * @accessor
          */
         snappingAnimationDuration: 150,
 
-        /*
+        /**
          * @cfg {Function} refreshFn The function that will be called to refresh the list.
          * If this is not defined, the store's load function will be called.
          * The refresh function gets called with a reference to this plugin instance.
@@ -84,8 +87,8 @@ Ext.define('Ext.plugin.PullRefresh', {
          */
         refreshFn: null,
 
-        /*
-         * @cfg {XTemplate/String/Array} pullTpl The template being used for the pull to refresh markup.
+        /**
+         * @cfg {Ext.XTemplate/String/Array} pullTpl The template being used for the pull to refresh markup.
          * @accessor
          */
         pullTpl: [
@@ -118,13 +121,27 @@ Ext.define('Ext.plugin.PullRefresh', {
     },
 
     init: function(list) {
+        var me = this;
+
+        me.setList(list);
+        me.initScrollable();
+    },
+
+    initScrollable: function() {
         var me = this,
+            list = me.getList(),
             store = list.getStore(),
             pullTpl = me.getPullTpl(),
             element = me.element,
-            scroller = list.getScrollable().getScroller();
+            scrollable = list.getScrollable(),
+            scroller;
 
-        me.setList(list);
+        if (!scrollable) {
+            return;
+        }
+
+        scroller = scrollable.getScroller();
+
         me.lastUpdated = new Date();
 
         list.insert(0, me);
@@ -162,6 +179,28 @@ Ext.define('Ext.plugin.PullRefresh', {
             scroll: me.onScrollChange,
             scope: me
         });
+    },
+
+    onScrollableChange: function() {
+        this.initScrollable();
+    },
+
+    updateList: function(newList, oldList) {
+        var me = this;
+
+        if (newList && newList != oldList) {
+            newList.on({
+                order: 'after',
+                scrollablechange: me.onScrollableChange,
+                scope: me
+            });
+        } else if (oldList) {
+            oldList.un({
+                order: 'after',
+                scrollablechange: me.onScrollableChange,
+                scope: me
+            });
+        }
     },
 
     /**

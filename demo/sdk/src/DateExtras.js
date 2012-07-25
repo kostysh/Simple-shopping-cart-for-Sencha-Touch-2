@@ -256,9 +256,7 @@ Ext.Date.parseFunctions['x-date-format'] = myDateParser;
      * may be used as a format string to {@link #format}. Example:</p><pre><code>
 Ext.Date.formatFunctions['x-date-format'] = myDateFormatter;
 </code></pre>
-     * <p>A formatting function should return a string representation of the passed Date object, and is passed the following parameters:<div class="mdetail-params"><ul>
-     * <li><code>date</code> : Date<div class="sub-desc">The Date to format.</div></li>
-     * </ul></div></p>
+     * <p>A formatting function should return a string representation of the Date object which is the scope (this) of the function.</p>
      * <p>To enable date strings to also be <i>parsed</i> according to that format, a corresponding
      * parsing function must be placed into the {@link #parseFunctions} property.
      * @property formatFunctions
@@ -633,6 +631,8 @@ dt = Ext.Date.parse("2006-02-29 03:20:01", "Y-m-d H:i:s", true); // returns null
             } else if (special) {
                 special = false;
                 code.push("'" + Ext.String.escape(ch) + "'");
+            } else if (ch == '\n') {
+                code.push(Ext.JSON.encode(ch));
             } else {
                 code.push(utilDate.getFormatCode(ch));
             }
@@ -1273,25 +1273,24 @@ console.log(dt2); //returns 'Tue Sep 26 2006 00:00:00'
      * @return {Date} The new Date instance.
      */
     add : function(date, interval, value) {
-        var d = Ext.Date.clone(date),
-            Date = Ext.Date;
+        var d = Ext.Date.clone(date);
         if (!interval || value === 0) return d;
 
         switch(interval.toLowerCase()) {
             case Ext.Date.MILLI:
-                d.setMilliseconds(d.getMilliseconds() + value);
+                d= new Date(d.valueOf() + value);
                 break;
             case Ext.Date.SECOND:
-                d.setSeconds(d.getSeconds() + value);
+                d= new Date(d.valueOf() + value * 1000);
                 break;
             case Ext.Date.MINUTE:
-                d.setMinutes(d.getMinutes() + value);
+                d= new Date(d.valueOf() + value * 60000);
                 break;
             case Ext.Date.HOUR:
-                d.setHours(d.getHours() + value);
+                d= new Date(d.valueOf() + value * 3600000);
                 break;
             case Ext.Date.DAY:
-                d.setDate(d.getDate() + value);
+                d= new Date(d.valueOf() + value * 86400000);
                 break;
             case Ext.Date.MONTH:
                 var day = date.getDate();
@@ -1318,6 +1317,104 @@ console.log(dt2); //returns 'Tue Sep 26 2006 00:00:00'
     between : function(date, start, end) {
         var t = date.getTime();
         return start.getTime() <= t && t <= end.getTime();
+    },
+
+    /**
+     * Calculate how many units are there between two time.
+     * @param {Date} min The first time
+     * @param {Date} max The second time
+     * @param {String} unit The unit. This unit is compatible with the date interval constants.
+     * @return {Number} The maximum number n of units that min + n * unit <= max
+     */
+    diff: function (min, max, unit) {
+        var ExtDate = Ext.Date, est, diff = +max - min;
+        switch (unit) {
+            case ExtDate.MILLI:
+                return diff;
+            case ExtDate.SECOND:
+                return Math.floor(diff / 1000);
+            case ExtDate.MINUTE:
+                return Math.floor(diff / 60000);
+            case ExtDate.HOUR:
+                return Math.floor(diff / 3600000);
+            case ExtDate.DAY:
+                return Math.floor(diff / 86400000);
+            case 'w':
+                return Math.floor(diff / 604800000);
+            case ExtDate.MONTH:
+                est = (max.getFullYear() * 12 + max.getMonth()) - (min.getFullYear() * 12 + min.getMonth());
+                if (Ext.Date.add(min, unit, est) > max) {
+                    return est - 1;
+                } else {
+                    return est;
+                }
+            case ExtDate.YEAR:
+                est = max.getFullYear() - min.getFullYear();
+                if (Ext.Date.add(min, unit, est) > max) {
+                    return est - 1;
+                } else {
+                    return est;
+                }
+        }
+    },
+
+    /**
+     * Align the date to `unit`
+     * @param {Date} date The date to be aligned
+     * @param {String} unit The unit. This unit is compatible with the date interval constants.
+     * @return {Date} The aligned date.
+     */
+    align: function (date, unit, step) {
+        var num = new Date(+date);
+        switch (unit.toLowerCase()) {
+            case Ext.Date.MILLI:
+                return num;
+                break;
+            case Ext.Date.SECOND:
+                num.setUTCSeconds(num.getUTCSeconds() - num.getUTCSeconds() % step);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.MINUTE:
+                num.setUTCMinutes(num.getUTCMinutes() - num.getUTCMinutes() % step);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.HOUR:
+                num.setUTCHours(num.getUTCHours() - num.getUTCHours() % step);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.DAY:
+                if (step == 7 || step == 14){
+                    num.setUTCDate(num.getUTCDate() - num.getUTCDay() + 1);
+                }
+                num.setUTCHours(0);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.MONTH:
+                num.setUTCMonth(num.getUTCMonth() - (num.getUTCMonth() - 1) % step,1);
+                num.setUTCHours(0);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return num;
+                break;
+            case Ext.Date.YEAR:
+                num.setUTCFullYear(num.getUTCFullYear() - num.getUTCFullYear() % step, 1, 1);
+                num.setUTCHours(0);
+                num.setUTCMinutes(0);
+                num.setUTCSeconds(0);
+                num.setUTCMilliseconds(0);
+                return date;
+                break;
+        }
     }
 };
 

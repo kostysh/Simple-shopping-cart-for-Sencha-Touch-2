@@ -264,6 +264,11 @@ Ext.define('Ext.XTemplate', {
     requires: 'Ext.XTemplateCompiler',
 
     /**
+     * @private
+     */
+    emptyObj: {},
+
+    /**
      * @cfg {Boolean} compiled
      * Only applies to {@link Ext.Template}, XTemplates are compiled automatically on the
      * first call to {@link #apply} or {@link #applyOut}.
@@ -273,23 +278,24 @@ Ext.define('Ext.XTemplate', {
         return this.applyOut(values, []).join('');
     },
 
-    applyOut: function(values, out) {
+    applyOut: function(values, out, parent) {
         var me = this,
             compiler;
 
         if (!me.fn) {
             compiler = new Ext.XTemplateCompiler({
-                useFormat: me.disableFormats !== true
+                useFormat: me.disableFormats !== true,
+                definitions: me.definitions
             });
 
             me.fn = compiler.compile(me.html);
         }
 
         try {
-            me.fn.call(me, out, values, {}, 1, 1);
+            me.fn.call(me, out, values, parent || me.emptyObj, 1, 1);
         } catch (e) {
             //<debug>
-            Ext.Logger.error(e.message);
+            Ext.Logger.log('Error: ' + e.message);
             //</debug>
         }
 

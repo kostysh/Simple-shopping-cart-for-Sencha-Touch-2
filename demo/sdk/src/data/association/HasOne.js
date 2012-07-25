@@ -177,14 +177,14 @@ Ext.define('Ext.data.association.HasOne', {
             if (inverse) {
                 foreignKey = inverse.getForeignKey();
             } else {
-                foreignKey = this.getOwnerName().toLowerCase() + '_id';
+                foreignKey = this.getAssociatedName().toLowerCase() + '_id';
             }
         }
         return foreignKey;
     },
 
     updateForeignKey: function(foreignKey, oldForeignKey) {
-        var fields = this.getAssociatedModel().getFields(),
+        var fields = this.getOwnerModel().getFields(),
             field = fields.get(foreignKey);
 
         if (!field) {
@@ -206,7 +206,7 @@ Ext.define('Ext.data.association.HasOne', {
 
     applyInstanceName: function(instanceName) {
         if (!instanceName) {
-            instanceName = this.getAssociatedName() + 'BelongsToInstance';
+            instanceName = this.getAssociatedName() + 'HasOneInstance';
         }
         return instanceName;
     },
@@ -292,6 +292,8 @@ Ext.define('Ext.data.association.HasOne', {
             if (Ext.isObject(options)) {
                 return this.save(options);
             }
+
+            return this;
         };
     },
 

@@ -9,7 +9,9 @@ Ext.define('Ext.viewport.Android', {
         this.on('orientationchange', 'doFireOrientationChangeEvent', this, { prepend: true });
         this.on('orientationchange', 'hideKeyboardIfNeeded', this, { prepend: true });
 
-        return this.callParent(arguments);
+        this.callParent(arguments);
+
+        this.addWindowListener('resize', Ext.Function.bind(this.onResize, this));
     },
 
     getDummyInput: function() {
@@ -82,8 +84,8 @@ Ext.define('Ext.viewport.Android', {
             this.windowOuterHeight = this.getWindowOuterHeight();
             this.updateSize();
 
-            eventController.firingArguments[1] = this.windowWidth;
-            eventController.firingArguments[2] = this.windowHeight;
+            eventController.firingArguments[2] = this.windowWidth;
+            eventController.firingArguments[3] = this.windowHeight;
             eventController.resume();
             this.orientationChanging = false;
 
@@ -116,6 +118,10 @@ Ext.define('Ext.viewport.Android', {
 
     doFixSize: function() {
         this.setHeight(this.getWindowHeight());
+    },
+
+    determineOrientation: function() {
+        return (this.getWindowHeight() >= this.getWindowWidth()) ? this.PORTRAIT : this.LANDSCAPE;
     },
 
     getActualWindowOuterHeight: function() {

@@ -25,7 +25,7 @@ Ext.define('Ext.behavior.Scrollable', {
     setConfig: function(config) {
         var scrollView = this.scrollView,
             component = this.component,
-            scrollViewElement, scrollerElement;
+            scrollerElement;
 
         if (config) {
             if (!scrollView) {
@@ -36,9 +36,8 @@ Ext.define('Ext.behavior.Scrollable', {
 
                 this.scrollerElement = scrollerElement = component.innerElement;
                 this.scrollContainer = scrollerElement.wrap();
-                this.scrollViewElement = scrollViewElement = component.bodyElement;
 
-                scrollView.setElement(scrollViewElement);
+                scrollView.setElement(component.bodyElement);
 
                 if (component.isPainted()) {
                     this.onComponentPainted(component);

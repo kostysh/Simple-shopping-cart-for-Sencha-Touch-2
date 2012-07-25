@@ -66,7 +66,7 @@ Ext.define('Ext.MessageBox', {
         /**
          * Override the default zIndex so it is normally always above floating components.
          */
-        zIndex: 10,
+        zIndex: 999,
 
         /**
          * @cfg {Number} defaultTextHeight
@@ -303,11 +303,11 @@ Ext.define('Ext.MessageBox', {
     updateIconCls: function(newIconCls, oldIconCls) {
         var me = this;
 
-        //ensure the title and btuton elements are added first
+        //ensure the title and button elements are added first
         this.getTitle();
         this.getButtons();
 
-        if (newIconCls && !oldIconCls) {
+        if (newIconCls) {
             this.add(newIconCls);
         } else {
             this.remove(oldIconCls);
@@ -564,8 +564,8 @@ Ext.define('Ext.MessageBox', {
      */
     alert: function(title, message, fn, scope) {
         return this.show({
-            title       : title,
-            message     : message,
+            title       : title || '',
+            message     : message || '',
             buttons     : Ext.MessageBox.OK,
             promptConfig: false,
             fn          : function() {
@@ -601,8 +601,8 @@ Ext.define('Ext.MessageBox', {
      */
     confirm: function(title, message, fn, scope) {
         return this.show({
-            title       : title,
-            message     : message,
+            title       : title || '',
+            message     : message || '',
             buttons     : Ext.MessageBox.YESNO,
             promptConfig: false,
             scope       : scope,
@@ -666,8 +666,8 @@ Ext.define('Ext.MessageBox', {
      */
     prompt: function(title, message, fn, scope, multiLine, value, prompt) {
         return this.show({
-            title    : title,
-            message  : message,
+            title    : title || '',
+            message  : message || '',
             buttons  : Ext.MessageBox.OKCANCEL,
             scope    : scope,
             prompt   : prompt || true,

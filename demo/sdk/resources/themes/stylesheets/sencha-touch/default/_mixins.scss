@@ -143,6 +143,17 @@ $default-gradient: $base-gradient;
   @else { @include background-gradient(lighten($bg-color, $contrast), $style) }
 }
 
+
+@mixin readable-color($color, $contrast: 100) {
+  @if lightness(lighten($color, 100 - $contrast)) > 30 {
+      color: $color;
+      fill: $color;
+  } @else {
+      color: darken(lighten($color, 100 - $contrast), 30);
+      fill: darken(lighten($color, 100 - $contrast), 30);
+  }
+}
+
 /**
  * Makes the element text overflow to use ellipsis.
  */

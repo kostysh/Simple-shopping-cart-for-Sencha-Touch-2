@@ -82,7 +82,7 @@ Ext.define('Ext.slider.Toggle', {
     },
 
     onTap: function() {
-        if (this.isDisabled()) {
+        if (this.isDisabled() || this.getReadOnly()) {
             return;
         }
 

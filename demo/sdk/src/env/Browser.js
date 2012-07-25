@@ -105,7 +105,7 @@ Ext.define('Ext.env.Browser', {
      * Note that only {@link Ext.Version#getMajor major component}  and {@link Ext.Version#getShortVersion simplified}
      * value of the version are available via direct property checking.
      *
-     * Supported values are: IE, Firefox, Safari, Chrome, Opera, WebKit, Gecko, Presto, Trident and Other
+     * Supported values are: IE, Firefox, Safari, Chrome, Opera, WebKit, Gecko, Presto, Trident, WebView and Other
      *
      * @param {String} value The OS name to check
      * @return {Boolean}
