@@ -75,6 +75,7 @@ Installing:
 
 Cart API methods:
 =============
+Cart.create();// Create and activate new cart
 Cart.deactivate();// Deactivate current active cart
 Cart.add(id, qty);// Add new record to cart (or update existed)
 Cart.update(id, qty, increment);// Update cart item
@@ -87,7 +88,7 @@ Cart.isArchive();// Check for archived carts
 Cart.restore(id);// Restore archived cart by Id
 Cart.clearArchive();// Clear all archived carts
 
-Script is fully commented, look into src/component/cart/src/Core.js
+Script is fully commented, look into src/ux/Cart/src/Core.js
 
 Live demo: 
 ==========
